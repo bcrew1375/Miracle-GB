@@ -1,0 +1,18 @@
+﻿  Z80-CPU.c
+Z80-CPU.c(3): fatal error C1083: Cannot open include file: 'sdl.h': No such file or directory
+  WinMain.c
+WinMain.c(2): fatal error C1083: Cannot open include file: 'sdl.h': No such file or directory
+  Sound.c
+  SDLFunctions.c
+SDLFunctions.c(1): fatal error C1083: Cannot open include file: 'SDL.h': No such file or directory
+  GBmemory.c
+  FileIO.c
+FileIO.c(31): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.16299.0\ucrt\stdio.h(207): note: see declaration of 'fopen'
+FileIO.c(35): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.16299.0\ucrt\stdio.h(207): note: see declaration of 'fopen'
+FileIO.c(48): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.16299.0\ucrt\stdio.h(207): note: see declaration of 'fopen'
+  Debugger.c
+Debugger.c(5): fatal error C1083: Cannot open include file: 'Win32/resource.h': No such file or directory
+  Generating Code...
