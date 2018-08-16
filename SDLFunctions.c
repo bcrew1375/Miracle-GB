@@ -211,6 +211,7 @@ void UpdateScreen()
 	texture = SDL_CreateTextureFromSurface(renderer, screen);
 	SDL_RenderClear(renderer);
 	SDL_RenderCopy(renderer, texture, 0, 0);
+	SDL_DestroyTexture(texture);
 	SDL_RenderPresent(renderer);
 
 	CheckSDLEvents();
@@ -270,6 +271,10 @@ void GetKeys()
 	else
 	{
 		SpeedKey = 0;
+	}
+	if (keyState[SDL_SCANCODE_F4])
+	{
+		SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
 	}
 
 	// Check Gameboy keystates.
