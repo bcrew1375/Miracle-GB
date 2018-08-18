@@ -1,8 +1,9 @@
 #include <stdio.h>
 #include <windows.h>
 
-// File handle to track open file.
-FILE *fileHandle;
+// Handle to track open file.
+FILE *handle;
+FILE *romHandle;
 
 char *bootRomFile = "bootrom.bin";
 
@@ -28,16 +29,16 @@ int LoadRomFile(char filename[])
 	// If bootRom is present, load it into    //
 	// memory.                                //
 	//----------------------------------------//
-	if((fileHandle = fopen(bootRomFile, "rb")) == NULL)
+	if((romHandle = fopen(bootRomFile, "rb")) == NULL)
 	{
 		bootRomFile = "bootrom/bootrom.bin";	// If not found in program folder, check "bootrom" subfolder.
 		
-		if((fileHandle = fopen(bootRomFile, "rb")) == NULL)
+		if((romHandle = fopen(bootRomFile, "rb")) == NULL)
 			bootRomPresent = 0;
 	}
 	else
 	{
-		bytesRead = fread(bootBuffer, 1, 0x100, fileHandle);
+		bytesRead = fread(bootBuffer, 1, 0x100, romHandle);
 		bootRomPresent = 1;
 	}
 	//----------------------------------------//
@@ -45,18 +46,18 @@ int LoadRomFile(char filename[])
 	// binary mode, if it fails, return with  //
 	// an error.                              //
 	//----------------------------------------//
-	if((fileHandle = fopen(filename, "rb")) == NULL)
+	if((romHandle = fopen(filename, "rb")) == NULL)
 		return -1;
 
 	//----------------------------------------//
 	// Read up to the max size of a GB ROM.   //
 	//----------------------------------------//
-	bytesRead = fread(romBuffer, 1, 0x200000, fileHandle);
+	bytesRead = fread(romBuffer, 1, 0x200000, romHandle);
 
 	//----------------------------------------//
 	// Close the file.                        //
 	//----------------------------------------//
-	fclose(fileHandle);
+	fclose(romHandle);
 
 	//----------------------------------------//
 	// See if there were any problems reading //
@@ -70,4 +71,18 @@ int LoadRomFile(char filename[])
 	// Return with no errors.                 //
 	//----------------------------------------//
 	return 0;
+}
+
+int OpenLogFile()
+{
+	handle = fopen("log.txt", "w");
+	if (!handle)
+		return 1;
+	else
+		return 0;
+}
+
+void WriteToLog(const char *writeData)
+{
+	fprintf(handle, writeData, NULL);
 }

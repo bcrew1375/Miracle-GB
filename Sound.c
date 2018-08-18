@@ -59,7 +59,7 @@ void soundCallback(void *userdata, unsigned char *stream, int len);
 
 int InitializeSound();
 
-FILE *fileHandle;
+FILE *romHandle;
 
 long int bytesRead;
 long int audioLen = 0;
@@ -119,10 +119,10 @@ int InitializeSound()
 	memset(Channel4Wave, 0, 4096);
 	memset(PlayWave, 0, 4096);
 
-	fileHandle = fopen("shutdown_sb.wav", "rb");
-	bytesRead = fread(PlayWave, 1, 524288, fileHandle);
+	romHandle = fopen("shutdown_sb.wav", "rb");
+	bytesRead = fread(PlayWave, 1, 524288, romHandle);
 	audioLen = bytesRead;
-	fclose(fileHandle);
+	fclose(romHandle);
 	
 	//SDL_PauseAudio(0);
 

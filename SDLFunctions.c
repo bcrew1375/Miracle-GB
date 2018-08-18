@@ -6,12 +6,12 @@
 //----------------------------------------//
 SDL_Color colors[4];
 SDL_Event event;
-SDL_Rect plotRectangle;
 SDL_Window *window;
 SDL_Surface *screen;
 SDL_Texture *texture;
 SDL_Renderer *renderer;
 SDL_TimerID timerID;
+SDL_DisplayMode displayMode;
 //----------------------------------------//
 
 
@@ -50,11 +50,13 @@ const unsigned int SCREEN_BPP = 8;
 // Miscellaneous variables.               //
 //----------------------------------------//
 
-unsigned int rectangleHeight = 2;
-unsigned int rectangleWidth = 2;
+unsigned int screenHeight = 144;
+unsigned int screenWidth = 160;
 
-unsigned int screenHeight = 288;
-unsigned int screenWidth = 320;
+unsigned int screenSizeMultiplier = 3;
+
+boolean fullScreenOn = 0;
+
 //----------------------------------------//
 
 
@@ -92,19 +94,35 @@ int InitializeSDL()
 
 
 //----------------------------------------//
+// Change the width and height of the     //
+// display.                               //
+//----------------------------------------//
+void ResizeScreen()
+{
+	//rectangleWidth = screenWidth / 160;
+	//rectangleHeight = screenHeight / 144;
+
+	SDL_SetWindowSize(window, screenWidth * screenSizeMultiplier, screenHeight * screenSizeMultiplier);
+}
+
+
+//----------------------------------------//
 // Open the SDL window, set up the palette//
 //----------------------------------------//
 int OpenSDLWindow()
 {
-	window = SDL_CreateWindow("Miracle GB", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screenWidth, screenHeight, SDL_WINDOW_OPENGL);
+	window = SDL_CreateWindowFrom(hWnd);//"Miracle GB", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screenWidth * screenSizeMultiplier, screenHeight * screenSizeMultiplier, SDL_WINDOW_OPENGL);
 	if (window == NULL)
 		return -1;
 	renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
 	if (renderer == NULL)
 		return -1;
+	SDL_RenderSetLogicalSize(renderer, screenWidth, screenHeight);
 	screen = SDL_CreateRGBSurface(0, screenWidth, screenHeight, 8, 0, 0, 0, 0);
 	// Set up a pointer to the screen
 	//screen_ptr = (unsigned char *)screen->pixels;	
+
+	ResizeScreen();
 
 	memset(&oldScreenData, 0, 0x5A00);
 	memset(&screenData, 0, 0x5A00);
@@ -132,20 +150,6 @@ int OpenSDLWindow()
 
 
 //----------------------------------------//
-// Change the width and height of the     //
-// display.                               //
-//----------------------------------------//
-void ResizeScreen()
-{
-	rectangleWidth = screenWidth / 160;
-	rectangleHeight = screenHeight / 144;
-	
-	if (OpenSDLWindow() == -1)
-		MessageBox(hWnd, "Could not open SDL window", "Error!", MB_OK);
-}
-
-
-//----------------------------------------//
 // Close down all SDL functions.          //
 //----------------------------------------//
 void CloseSDL()
@@ -169,11 +173,11 @@ void CheckSDLEvents()
 //----------------------------------------//
 void UpdateScreen()
 {
-	unsigned int i;
+	/*unsigned int i;
 	unsigned int j;
 		
-	plotRectangle.w = rectangleWidth;
-	plotRectangle.h = rectangleHeight;
+	plotRectangle.w = 1;//rectangleWidth;
+	plotRectangle.h = 1;//rectangleHeight;
 
 	// Make sure the display is enabled.
 	if (memory[0xFF40] & 0x80)
@@ -184,10 +188,10 @@ void UpdateScreen()
 			{
 				if ((screenData[((j << 7) + (j << 5)) + i]) != (unsigned char)(oldScreenData[((j << 7) + (j << 5)) + i]))
 				{
-					plotRectangle.x = i * rectangleWidth;
-					plotRectangle.y = j * rectangleHeight;
+					//plotRectangle.x = i;// * rectangleWidth;
+					//plotRectangle.y = j;// * rectangleHeight;
 					
-					SDL_FillRect(screen, &plotRectangle, (unsigned char)(screenData[((j << 7) + (j << 5)) + i]));
+					//SDL_FillRect(screen, &plotRectangle, (unsigned char)(screenData[((j << 7) + (j << 5)) + i]));
 				}
 			}
 		}
@@ -199,15 +203,16 @@ void UpdateScreen()
 		{
 			for (i = 0; i < 160; i++)
 			{
-					plotRectangle.x = i * rectangleWidth;
-					plotRectangle.y = j * rectangleHeight;
+				plotRectangle.x = i;// * rectangleWidth;
+				plotRectangle.y = j;// * rectangleHeight;
 					
-					SDL_FillRect(screen, &plotRectangle, 0);
+				SDL_FillRect(screen, &plotRectangle, 0);
 			}
 		}
 		memset(&oldScreenData[0x0000], 0, 0x5A00);
-	}
+	}*/
 
+	SDL_memcpy(screen->pixels, &screenData, 0x5A00);
 	texture = SDL_CreateTextureFromSurface(renderer, screen);
 	SDL_RenderClear(renderer);
 	SDL_RenderCopy(renderer, texture, 0, 0);
@@ -224,10 +229,12 @@ void UpdateScreen()
 //----------------------------------------//
 unsigned int UpdateFPS(Uint32 interval, void *param)
 {
-	char windowText[256];
-
-	sprintf(windowText, "FPS: %d", FPS);
-	SDL_SetWindowTitle(window, windowText);
+	char *windowTitle[256];
+	
+	//*windowTitle = SDL_GetWindowTitle(window);
+	
+	sprintf(&windowTitle, "Miracle GB   FPS: %d", FPS);
+	SDL_SetWindowTitle(window, windowTitle);
 
 	FPS = 0;
 	
@@ -236,16 +243,21 @@ unsigned int UpdateFPS(Uint32 interval, void *param)
 
 
 //----------------------------------------//
-// This pauses the emulation.  It sets the//
-// focus back to the main window and      //
-// removes the emulation timers.          //
+// This pauses or resumes the emulation   //
+// and removes the FPS timer.             //
 //----------------------------------------//
 void PauseEmu()
 {
-	CPURunning = 0;
-	SetFocus(hWnd);
-
-	SDL_RemoveTimer(FPSTimerID);
+	if (CPURunning = 1)
+	{
+		CPURunning = 0;
+		SDL_RemoveTimer(FPSTimerID);
+	}
+	else
+	{
+		CPURunning = 1;
+		RunEmulation();
+	}
 }
 
 
@@ -262,6 +274,7 @@ void GetKeys()
 	// Check System keystates.
 	if (keyState[SDL_SCANCODE_ESCAPE])
 	{
+		CPURunning ^ 1;
 		PauseEmu();
 	}
 	if (keyState[SDL_SCANCODE_TAB])
@@ -272,10 +285,25 @@ void GetKeys()
 	{
 		SpeedKey = 0;
 	}
-	if (keyState[SDL_SCANCODE_F4])
+	/*if (keyState[SDL_SCANCODE_F4])
 	{
-		SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
-	}
+		if (fullScreenOn == 0)
+		{
+			//if (SDL_GetDesktopDisplayMode(0, &displayMode))
+			//{
+			//	SDL_SetWindowSize(window, displayMode.w, displayMode.h);
+			//	fullScreenOn = 1;
+			//}
+			SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
+			fullScreenOn = 1;
+		}
+		else
+		{
+			//SDL_SetWindowSize(window, screenWidth * screenSizeMultiplier, screenHeight * screenSizeMultiplier);
+			SDL_SetWindowFullscreen(window, 0);
+			fullScreenOn = 0;
+		}
+	}*/
 
 	// Check Gameboy keystates.
 	if (keyState[SDL_SCANCODE_DOWN])

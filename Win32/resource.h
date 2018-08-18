@@ -1,12 +1,11 @@
 //{{NO_DEPENDENCIES}}
-// Microsoft Developer Studio generated include file.
+// Microsoft Visual C++ generated include file.
 // Used by resource.rc
 //
 #define IDR_MENU1                       102
 #define IDD_DEBUGGER                    103
 #define IDD_MEMORYSPACE                 1000
 #define IDD_CPUSTATUS                   1001
-#define IDC_REGISTERS                   1002
 #define IDC_CPU_REGISTERS               1002
 #define IDD_REGISTER_AF                 1003
 #define IDD_REGISTER_AF_EDIT            1004
@@ -83,13 +82,14 @@
 #define IDM_DEBUG_STARTLOGGING          40011
 #define IDM_DEBUG_STOPLOGGING           40012
 #define IDM_DEBUG_STARTDEBUGGER         40013
+#define ID_Menu                         40014
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        105
-#define _APS_NEXT_COMMAND_VALUE         40014
+#define _APS_NEXT_RESOURCE_VALUE        106
+#define _APS_NEXT_COMMAND_VALUE         40018
 #define _APS_NEXT_CONTROL_VALUE         1072
 #define _APS_NEXT_SYMED_VALUE           101
 #endif

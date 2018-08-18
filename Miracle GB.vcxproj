@@ -108,15 +108,14 @@
     <ClCompile Include="GBmemory.c" />
     <ClCompile Include="SDLFunctions.c" />
     <ClCompile Include="Sound.c" />
-    <ClCompile Include="WinMain.c" />
-    <ClCompile Include="Z80-CPU.c" />
+    <ClCompile Include="Win32\WinMain.c" />
+    <ClCompile Include="GBCPU.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\SDL2\include\SDL.h" />
     <ClInclude Include="Common.h" />
     <ClInclude Include="Define.h" />
     <ClInclude Include="GBmemory.h" />
-    <ClInclude Include="resource.h" />
     <ClInclude Include="Win32\resource.h" />
   </ItemGroup>
   <ItemGroup>

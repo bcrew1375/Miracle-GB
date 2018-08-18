@@ -1095,24 +1095,30 @@ Debugger.c(824): warning C4996: 'sprintf': This function or variable may be unsa
 Debugger.c(830): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
   C:\Program Files (x86)\Windows Kits\10\Include\10.0.17134.0\ucrt\stdio.h(1774): note: see declaration of 'sprintf'
   FileIO.c
-FileIO.c(31): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+FileIO.c(32): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
   C:\Program Files (x86)\Windows Kits\10\Include\10.0.17134.0\ucrt\stdio.h(208): note: see declaration of 'fopen'
-FileIO.c(35): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+FileIO.c(36): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
   C:\Program Files (x86)\Windows Kits\10\Include\10.0.17134.0\ucrt\stdio.h(208): note: see declaration of 'fopen'
-FileIO.c(48): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+FileIO.c(49): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.17134.0\ucrt\stdio.h(208): note: see declaration of 'fopen'
+FileIO.c(78): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
   C:\Program Files (x86)\Windows Kits\10\Include\10.0.17134.0\ucrt\stdio.h(208): note: see declaration of 'fopen'
   GBmemory.c
   SDLFunctions.c
-SDLFunctions.c(228): warning C4013: 'sprintf' undefined; assuming extern returning int
-SDLFunctions.c(259): warning C4090: 'initializing': different 'const' qualifiers
+SDLFunctions.c(236): warning C4013: 'sprintf' undefined; assuming extern returning int
+SDLFunctions.c(237): warning C4047: 'function': 'const char *' differs in levels of indirection from 'char *[256]'
+SDLFunctions.c(237): warning C4024: 'SDL_SetWindowTitle': different types for formal and actual parameter 2
+SDLFunctions.c(259): warning C4013: 'RunEmulation' undefined; assuming extern returning int
+SDLFunctions.c(277): warning C4552: '^': operator has no effect; expected operator with side-effect
+SDLFunctions.c(272): warning C4090: 'initializing': different 'const' qualifiers
   Sound.c
   WinMain.c
-  Z80-CPU.c
-Z80-CPU.c(547): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
-  C:\Program Files (x86)\Windows Kits\10\Include\10.0.17134.0\ucrt\stdio.h(208): note: see declaration of 'fopen'
-Z80-CPU.c(3206): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  GBCPU.c
+GBCPU.c(3202): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
   C:\Program Files (x86)\Windows Kits\10\Include\10.0.17134.0\ucrt\stdio.h(1774): note: see declaration of 'sprintf'
-Z80-CPU.c(3266): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+GBCPU.c(3262): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.17134.0\ucrt\stdio.h(1774): note: see declaration of 'sprintf'
+GBCPU.c(3346): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
   C:\Program Files (x86)\Windows Kits\10\Include\10.0.17134.0\ucrt\stdio.h(1774): note: see declaration of 'sprintf'
   Generating Code...
 LINK : warning LNK4075: ignoring '/INCREMENTAL' due to '/OPT:ICF' specification

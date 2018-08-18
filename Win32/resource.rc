@@ -1,4 +1,4 @@
-//Microsoft Developer Studio generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #include "resource.h"
 
@@ -7,20 +7,16 @@
 //
 // Generated from the TEXTINCLUDE 2 resource.
 //
-#include "WinResrc.h"
-#define IDC_STATIC  -1
-
+#include "afxres.h"
 /////////////////////////////////////////////////////////////////////////////
 #undef APSTUDIO_READONLY_SYMBOLS
 
 /////////////////////////////////////////////////////////////////////////////
-// English (U.S.) resources
+// English (United States) resources
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
-#ifdef _WIN32
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 #pragma code_page(1252)
-#endif //_WIN32
 
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////
@@ -28,18 +24,17 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 // TEXTINCLUDE
 //
 
-1 TEXTINCLUDE DISCARDABLE 
+1 TEXTINCLUDE 
 BEGIN
     "resource.h\0"
 END
 
-2 TEXTINCLUDE DISCARDABLE 
+2 TEXTINCLUDE 
 BEGIN
-    "#include ""afxres.h""\r\n"
-    "\0"
+    "afxres.h\0"
 END
 
-3 TEXTINCLUDE DISCARDABLE 
+3 TEXTINCLUDE 
 BEGIN
     "\r\n"
     "\0"
@@ -53,7 +48,7 @@ END
 // Menu
 //
 
-IDR_MENU1 MENU DISCARDABLE 
+IDR_MENU1 MENU
 BEGIN
     POPUP "File"
     BEGIN
@@ -69,19 +64,7 @@ BEGIN
     END
     POPUP "Options"
     BEGIN
-        MENUITEM "Use FPS Limit",               IDM_OPTIONS_USEFPSLIMIT
-        , CHECKED
-        POPUP "Display Size"
-        BEGIN
-            MENUITEM "1x",                          IDM_OPTIONS_DISPLAYSIZE_1X
-
-            MENUITEM "2x",                          IDM_OPTIONS_DISPLAYSIZE_2X
-
-            MENUITEM "3x",                          IDM_OPTIONS_DISPLAYSIZE_3X
-
-            MENUITEM "4x",                          IDM_OPTIONS_DISPLAYSIZE_4X
-
-        END
+        MENUITEM "Use FPS Limit",               IDM_OPTIONS_USEFPSLIMIT, CHECKED
     END
     POPUP "Debug"
     BEGIN
@@ -97,10 +80,10 @@ END
 // Dialog
 //
 
-IDD_DEBUGGER DIALOG DISCARDABLE  0, 0, 432, 338
-STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+IDD_DEBUGGER DIALOGEX 0, 0, 432, 338
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Debugger"
-FONT 12, "Courier"
+FONT 12, "Courier", 0, 0, 0x0
 BEGIN
     GROUPBOX        "Memory Space",IDD_MEMORYSPACE,12,9,211,198
     GROUPBOX        "CPU Status",IDD_CPUSTATUS,230,7,195,324
@@ -118,8 +101,7 @@ BEGIN
     LTEXT           "PC",IDD_REGISTER_PC,240,97,12,10
     EDITTEXT        IDD_REGISTER_PC_EDIT,255,97,27,12,ES_AUTOHSCROLL
     PUSHBUTTON      "Apply Changes",IDD_APPLYREGISTERCHANGES,240,112,54,11
-    LISTBOX         IDD_LISTBOX_DEBUGGER_CODE,16,30,164,171,LBS_SORT | 
-                    LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
+    LISTBOX         IDD_LISTBOX_DEBUGGER_CODE,16,30,164,171,LBS_SORT | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Address|",IDD_ADDRESS,17,20,31,10
     LTEXT           "Bytes     |",IDC_CODE,50,20,44,10
     LTEXT           "Code",IDC_STATIC,94,20,25,10
@@ -179,7 +161,7 @@ END
 //
 
 #ifdef APSTUDIO_INVOKED
-GUIDELINES DESIGNINFO DISCARDABLE 
+GUIDELINES DESIGNINFO
 BEGIN
     IDD_DEBUGGER, DIALOG
     BEGIN
@@ -191,7 +173,18 @@ BEGIN
 END
 #endif    // APSTUDIO_INVOKED
 
-#endif    // English (U.S.) resources
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// AFX_DIALOG_LAYOUT
+//
+
+IDD_DEBUGGER AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+#endif    // English (United States) resources
 /////////////////////////////////////////////////////////////////////////////
 
 

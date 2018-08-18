@@ -30,7 +30,7 @@
 // Define the number of cycles to run per //
 // 1/60th of a second.                    //
 //----------------------------------------//
-#define cyclesToRun (17476)
+#define cyclesToRun (17555)
 
 //----------------------------------------//
 // Bit definitions.                       //

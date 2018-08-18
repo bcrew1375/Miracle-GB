@@ -30,10 +30,10 @@
     <ClCompile Include="Sound.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="WinMain.c">
+    <ClCompile Include="Win32\WinMain.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Z80-CPU.c">
+    <ClCompile Include="GBCPU.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -48,9 +48,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\SDL2\include\SDL.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Win32\resource.h">
