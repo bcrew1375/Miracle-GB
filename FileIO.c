@@ -3,16 +3,15 @@
 
 // Handle to track open file.
 FILE *handle;
-FILE *romHandle;
+
+// Define the maximum size in bytes the loaded file can be.
+unsigned int maxFileSize = 0x1000000;
 
 char *bootRomFile = "bootrom.bin";
 
 // Variable to hold number of bytes read from file.
 unsigned long int bytesRead;
 
-// External variable used to store the ROM binary.
-extern unsigned char *bootBuffer;
-extern unsigned char *romBuffer;
 
 unsigned int bootRomPresent;
 
@@ -23,13 +22,17 @@ unsigned int bootRomPresent;
 // Variables: filename is a string holding//
 // the ROM file to be opened.             //
 //----------------------------------------//
-int LoadRomFile(char filename[])
+/*unsigned char* LoadRomFile(char filename[], )
 {
+	FILE *romHandle;
+	unsigned char *fileBuffer;
+	unsigned long int fileSize;
+
 	//----------------------------------------//
 	// If bootRom is present, load it into    //
 	// memory.                                //
 	//----------------------------------------//
-	if((romHandle = fopen(bootRomFile, "rb")) == NULL)
+	/*if((romHandle = fopen(bootRomFile, "rb")) == NULL)
 	{
 		bootRomFile = "bootrom/bootrom.bin";	// If not found in program folder, check "bootrom" subfolder.
 		
@@ -40,19 +43,29 @@ int LoadRomFile(char filename[])
 	{
 		bytesRead = fread(bootBuffer, 1, 0x100, romHandle);
 		bootRomPresent = 1;
-	}
+	}*/
 	//----------------------------------------//
 	// Try to open the file in Read-Only      //
 	// binary mode, if it fails, return with  //
 	// an error.                              //
 	//----------------------------------------//
-	if((romHandle = fopen(filename, "rb")) == NULL)
+/*	if((romHandle = fopen(filename, "rb")) == NULL)
 		return -1;
+	
+	// Make sure the file doesn't exceed maximum allowed size
+	fileSize = filelength(romHandle);
+	if (fileSize > maxFileSize)
+		return -2;
+	fileBuffer = malloc(fileSize);
+	if (!fileBuffer)
+		return -3;
+	rewind(romHandle);
 
 	//----------------------------------------//
 	// Read up to the max size of a GB ROM.   //
 	//----------------------------------------//
-	bytesRead = fread(romBuffer, 1, 0x200000, romHandle);
+	fread(fileBuffer, 1, 0x200000, romHandle);
+		return -4;
 
 	//----------------------------------------//
 	// Close the file.                        //
@@ -60,18 +73,10 @@ int LoadRomFile(char filename[])
 	fclose(romHandle);
 
 	//----------------------------------------//
-	// See if there were any problems reading //
-	// the file and make sure the file size   //
-	// is not 0.                              //
-	//----------------------------------------//
-	if ((!bytesRead) || (bytesRead == 0))
-		return -2;
-
-	//----------------------------------------//
 	// Return with no errors.                 //
 	//----------------------------------------//
-	return 0;
-}
+	return &fileBuffer;
+}*/
 
 int OpenLogFile()
 {

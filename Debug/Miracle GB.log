@@ -1,18 +1,44 @@
-﻿  Z80-CPU.c
-Z80-CPU.c(3): fatal error C1083: Cannot open include file: 'sdl.h': No such file or directory
+﻿  GBCPU.c
+GBCPU.c(1492): warning C4244: 'function': conversion from 'uint16_t' to 'unsigned char', possible loss of data
+GBCPU.c(1494): warning C4244: 'function': conversion from 'uint16_t' to 'unsigned char', possible loss of data
+GBCPU.c(3087): warning C4029: declared formal parameter list different from definition
+GBCPU.c(3209): warning C4133: 'function': incompatible types - from 'uint8_t *' to 'unsigned short *'
+GBCPU.c(3209): warning C4020: 'z80_INC_reg16': too many actual parameters
+GBCPU.c(3223): warning C4133: 'function': incompatible types - from 'uint8_t *' to 'unsigned short *'
+GBCPU.c(3223): warning C4020: 'z80_LD_reg16_value': too many actual parameters
+GBCPU.c(3239): warning C4133: 'function': incompatible types - from 'uint8_t *' to 'unsigned short *'
+GBCPU.c(3239): warning C4020: 'z80_LD_reg16_value': too many actual parameters
+GBCPU.c(3255): warning C4133: 'function': incompatible types - from 'uint8_t *' to 'unsigned short *'
+GBCPU.c(3255): warning C4020: 'z80_LD_reg16_value': too many actual parameters
+GBCPU.c(3674): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.17134.0\ucrt\stdio.h(1774): note: see declaration of 'sprintf'
+GBCPU.c(3734): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.17134.0\ucrt\stdio.h(1774): note: see declaration of 'sprintf'
+GBCPU.c(3820): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.17134.0\ucrt\stdio.h(1774): note: see declaration of 'sprintf'
   WinMain.c
-WinMain.c(2): fatal error C1083: Cannot open include file: 'sdl.h': No such file or directory
+Win32\WinMain.c(116): warning C4047: 'function': 'PLARGE_INTEGER' differs in levels of indirection from 'PLARGE_INTEGER *'
+Win32\WinMain.c(116): warning C4024: 'GetFileSizeEx': different types for formal and actual parameter 2
+Win32\WinMain.c(120): warning C4047: '>': 'PLARGE_INTEGER' differs in levels of indirection from 'unsigned int'
+Win32\WinMain.c(127): warning C4047: 'function': '::size_t' differs in levels of indirection from 'PLARGE_INTEGER'
+Win32\WinMain.c(127): warning C4024: 'malloc': different types for formal and actual parameter 1
+Win32\WinMain.c(130): warning C4047: 'function': 'DWORD' differs in levels of indirection from 'PLARGE_INTEGER'
+Win32\WinMain.c(130): warning C4024: 'ReadFile': different types for formal and actual parameter 3
+Win32\WinMain.c(133): warning C4047: 'function': 'unsigned int' differs in levels of indirection from 'PLARGE_INTEGER'
+Win32\WinMain.c(133): warning C4024: 'EmulationInitialize': different types for formal and actual parameter 2
+Win32\WinMain.c(126): warning C4101: 'bytesRead': unreferenced local variable
   Sound.c
   SDLFunctions.c
-SDLFunctions.c(1): fatal error C1083: Cannot open include file: 'SDL.h': No such file or directory
+SDLFunctions.c(236): warning C4013: 'sprintf' undefined; assuming extern returning int
+SDLFunctions.c(237): warning C4047: 'function': 'const char *' differs in levels of indirection from 'char *[256]'
+SDLFunctions.c(237): warning C4024: 'SDL_SetWindowTitle': different types for formal and actual parameter 2
+SDLFunctions.c(259): warning C4013: 'RunEmulation' undefined; assuming extern returning int
+SDLFunctions.c(277): warning C4552: '^': operator has no effect; expected operator with side-effect
+SDLFunctions.c(272): warning C4090: 'initializing': different 'const' qualifiers
   GBmemory.c
   FileIO.c
-FileIO.c(31): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
-  C:\Program Files (x86)\Windows Kits\10\Include\10.0.16299.0\ucrt\stdio.h(207): note: see declaration of 'fopen'
-FileIO.c(35): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
-  C:\Program Files (x86)\Windows Kits\10\Include\10.0.16299.0\ucrt\stdio.h(207): note: see declaration of 'fopen'
-FileIO.c(48): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
-  C:\Program Files (x86)\Windows Kits\10\Include\10.0.16299.0\ucrt\stdio.h(207): note: see declaration of 'fopen'
+FileIO.c(83): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.17134.0\ucrt\stdio.h(208): note: see declaration of 'fopen'
   Debugger.c
-Debugger.c(5): fatal error C1083: Cannot open include file: 'Win32/resource.h': No such file or directory
   Generating Code...
+  Miracle GB.vcxproj -> C:\Users\Benjamin\Desktop\Software Dev\Miracle GB Rewrite - Sound Library\Debug\Miracle GB.exe

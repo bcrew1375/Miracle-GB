@@ -1,4 +1,4 @@
-#include <windows.h>
+/*#include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -51,22 +51,22 @@ CALLBACK UpdateDebugger(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			// This will fill in the register		  //
 			// text box values.						  //
 			//----------------------------------------//
-			sprintf(data, "0x%04X", regs.AF);
+			sprintf(data, "0x%04X", emu.cpu.regs.AF);
 			SetWindowText(GetDlgItem(hDlg, IDD_REGISTER_AF_EDIT), data);
 			
-			sprintf(data, "0x%04X", regs.BC);
+			sprintf(data, "0x%04X", emu.cpu.regs.BC);
 			SetWindowText(GetDlgItem(hDlg, IDD_REGISTER_BC_EDIT), data);
 			
-			sprintf(data, "0x%04X", regs.DE);
+			sprintf(data, "0x%04X", emu.cpu.regs.DE);
 			SetWindowText(GetDlgItem(hDlg, IDD_REGISTER_DE_EDIT), data);
 			
-			sprintf(data, "0x%04X", regs.HL);
+			sprintf(data, "0x%04X", emu.cpu.regs.HL);
 			SetWindowText(GetDlgItem(hDlg, IDD_REGISTER_HL_EDIT), data);
 			
-			sprintf(data, "0x%04X", regs.SP);
+			sprintf(data, "0x%04X", emu.cpu.regs.SP);
 			SetWindowText(GetDlgItem(hDlg, IDD_REGISTER_SP_EDIT), data);
 			
-			sprintf(data, "0x%04X", regs.PC);
+			sprintf(data, "0x%04X", emu.cpu.regs.PC);
 			SetWindowText(GetDlgItem(hDlg, IDD_REGISTER_PC_EDIT), data);
 			//----------------------------------------//
 
@@ -154,42 +154,42 @@ CALLBACK UpdateDebugger(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 				if ((convertedString,strtol(data, NULL, 0)) > 0xFFFF)
 					MessageBox(hDlg, "Register AF contains invalid data!", "Error", MB_OK);
 				else
-					regs.AF,(unsigned short int)convertedString;
+					emu.cpu.regs.AF,(unsigned short int)convertedString;
 				
 				// Gets the entered value for register BC
 				GetWindowText(GetDlgItem(hDlg, IDD_REGISTER_BC_EDIT), data, 256);
 				if ((convertedString,strtol(data, NULL, 0)) > 0xFFFF)
 					MessageBox(hDlg, "Register BC contains invalid data!", "Error", MB_OK);
 				else
-					regs.BC,(unsigned short int)convertedString;
+					emu.cpu.regs.BC,(unsigned short int)convertedString;
 				
 				// Gets the entered value for register DE
 				GetWindowText(GetDlgItem(hDlg, IDD_REGISTER_DE_EDIT), data, 256);
 				if ((convertedString,strtol(data, NULL, 0)) > 0xFFFF)
 					MessageBox(hDlg, "Register DE contains invalid data!", "Error", MB_OK);
 				else
-					regs.DE,(unsigned short int)convertedString;
+					emu.cpu.regs.DE,(unsigned short int)convertedString;
 				
 				// Gets the entered value for register HL
 				GetWindowText(GetDlgItem(hDlg, IDD_REGISTER_HL_EDIT), data, 256);
 				if ((convertedString,strtol(data, NULL, 0)) > 0xFFFF)
 					MessageBox(hDlg, "Register HL contains invalid data!", "Error", MB_OK);
 				else
-					regs.HL,(unsigned short int)convertedString;
+					emu.cpu.regs.HL,(unsigned short int)convertedString;
 				
 				// Gets the entered value for register SP
 				GetWindowText(GetDlgItem(hDlg, IDD_REGISTER_SP_EDIT), data, 256);
 				if ((convertedString,strtol(data, NULL, 0)) > 0xFFFF)
 					MessageBox(hDlg, "Register SP contains invalid data!", "Error", MB_OK);
 				else
-					regs.SP,(unsigned short int)convertedString;
+					emu.cpu.regs.SP,(unsigned short int)convertedString;
 				
 				// Gets the entered value for register PC
 				GetWindowText(GetDlgItem(hDlg, IDD_REGISTER_PC_EDIT), data, 256);
 				if ((convertedString,strtol(data, NULL, 0)) > 0xFFFF)
 					MessageBox(hDlg, "Register PC contains invalid data!", "Error", MB_OK);
 				else
-					regs.PC,(unsigned short int)convertedString;
+					emu.cpu.regs.PC,(unsigned short int)convertedString;
 			}
 		break;
 		}
@@ -738,14 +738,14 @@ void DisassembleLine(unsigned int address, char *data)
 	// the listbox and account for opcodes	  //
 	// that take more than 1 byte.			  //
 	//----------------------------------------//
-	if (opcodeBytes[memory[address]] == 3)
+	if (opcodeBytes[emu.memory.romBank[address]] == 3)
 	{		
-		sprintf(data, "0x%04X: %02X %02X %02X   %s", address, memory[address], memory[address + 1], memory[address + 2], opcodeDescription[memory[address]]);
+		sprintf(data, "0x%04X: %02X %02X %02X   %s", address, emu.memory.romBank[address], emu.memory.romBank[address + 1], emu.memory.romBank[address + 2], opcodeDescription[emu.memory.romBank[address]]);
 		stringPointer = strstr(data, "####");
 
 		if (stringPointer != NULL)
 		{
-			opcodeAddress = (memory[address + 2] << 8) + memory[address + 1];
+			opcodeAddress = (emu.memory.romBank[address + 2] << 8) + emu.memory.romBank[address + 1];
 
 			sprintf(replaceData, "%04X", opcodeAddress);
 
@@ -756,12 +756,12 @@ void DisassembleLine(unsigned int address, char *data)
 		}
 		address += 2;
 	}
-	else if (opcodeBytes[memory[address]] == 2)
+	else if (opcodeBytes[emu.memory.romBank[address]] == 2)
 	{
-		sprintf(data, "0x%04X: %02X %02X      %s", address, memory[address], memory[address + 1], opcodeDescription[memory[address]]);
+		sprintf(data, "0x%04X: %02X %02X      %s", address, emu.memory.romBank[address], emu.memory.romBank[address + 1], opcodeDescription[emu.memory.romBank[address]]);
 		if ((stringPointer = strstr(data, "##")) != NULL)
 		{
-			opcodeAddress = memory[address + 1];
+			opcodeAddress = emu.memory.romBank[address + 1];
 
 			sprintf(replaceData, "%02X", opcodeAddress);
 
@@ -773,7 +773,7 @@ void DisassembleLine(unsigned int address, char *data)
 		//----------------------------------------//
 		else if ((stringPointer = strstr(data, "****")) != NULL)
 		{
-			opcodeAddress = address + (signed char)memory[address + 1] + 2;
+			opcodeAddress = address + (signed char)emu.memory.romBank[address + 1] + 2;
 
 			sprintf(replaceData, "%04X", opcodeAddress);
 
@@ -790,7 +790,7 @@ void DisassembleLine(unsigned int address, char *data)
 			// implementation to add a - or + sign to //
 			// the ADD SP opcode					  //
 			//----------------------------------------//
-			opcodeAddress = memory[address + 1];
+			opcodeAddress = emu.memory.romBank[address + 1];
 
 			if (opcodeAddress > 128)
 			{
@@ -819,14 +819,14 @@ void DisassembleLine(unsigned int address, char *data)
 			*(stringPointer + 1) = replaceData[1];
 			*(stringPointer + 2) = replaceData[2];
 		}
-		else if (memory[address] == 0xCB)
+		else if (emu.memory.romBank[address] == 0xCB)
 		{
-			sprintf(data, "0x%04X: %02X %02X      %s", address, memory[address], memory[address + 1], opcodeCBDescription[memory[address]]);
+			sprintf(data, "0x%04X: %02X %02X      %s", address, emu.memory.romBank[address], emu.memory.romBank[address + 1], opcodeCBDescription[emu.memory.romBank[address]]);
 		}
 		address++;
 	}
 	else
 	{
-		sprintf(data, "0x%04X: %02X         %s", address, memory[address], opcodeDescription[memory[address]]);
+		sprintf(data, "0x%04X: %02X         %s", address, emu.memory.romBank[address], opcodeDescription[emu.memory.romBank[address]]);
 	}
-}
+}*/

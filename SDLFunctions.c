@@ -180,7 +180,7 @@ void UpdateScreen()
 	plotRectangle.h = 1;//rectangleHeight;
 
 	// Make sure the display is enabled.
-	if (memory[0xFF40] & 0x80)
+	if (emu.memory.romBank[0xFF40] & 0x80)
 	{
 		for (j = 0; j < 144; j++)
 		{

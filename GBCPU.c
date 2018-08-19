@@ -4,25 +4,70 @@
 #include <windows.h>
 
 #include "define.h"
-#include "Common.h"
+//#include "Common.h"
 //----------------------------------------//
 // Sound Library stuff                    //
 //----------------------------------------//
 //#include "gbsound/audio.h"
 
 //AUDIO aud;
-Registers regs;
+//Registers emu.cpu.regs;
+
+struct Emulation
+{
+	struct AddressSpace
+	{
+		Uint8 romBank[0x8000];
+		Uint8 gbRam[0x2000];
+		Uint8 gbRamEcho[0x2000];
+		Uint8 gbRamBank[0x2000];
+	} memory;
+
+	struct Cartridge
+	{
+		int systemType;
+		int mbcType;
+		unsigned char *dataBuffer;  // Set a maximum cartridge size at 16 megabytes.
+	} cart;
+
+	struct CPU
+	{
+		struct GBOpcodes
+		{
+			unsigned int cycles[0x100];  // Store the number of clock cycles for every instruction
+			unsigned int bitCycles[0x100];  // Store cycles for bit instructions
+		} gbOpcode;
+
+		union Registers
+		{
+			struct { uint16_t AF, BC, DE, HL, SP, PC; };
+			struct { uint8_t F, A, C, B, E, D, L, H, SPL, SPH, PCL, PCH; };
+		} regs;
+
+		struct State
+		{
+			boolean running;
+			int cycles;
+		} state;
+
+	} cpu;
+	struct IO
+	{
+		struct IORegisters
+		{
+			uint8_t P1, SB, SC, DIV, TIMA, TMA, TAC, IF, NR10, NR11, NR12, NR13, NR14, NR21, NR22, NR23, NR24, NR30, NR31, NR32, NR33, NR34, NR41, NR42, NR43, NR44, NR50, NR51, NR52,
+				    LCDC, STAT, SCY, SCX, LY, LYC, DMA, BGP, OBP1, OBP2, WY, WX, IE;
+			uint8_t soundWave[16];  // Array to hold soundwave from 0xFF30-0xFF3F
+		} regs;
+	} io;
+} emu;
 
 //----------------------------------------//
 // External data                          //
 //----------------------------------------//
-extern unsigned char *bootBuffer;
-extern unsigned char *romBuffer;
-extern unsigned char *memory;
 extern unsigned char oldScreenData[160 * 144];
 extern unsigned char screenData[160 * 144];
-extern unsigned char MBCType;
-extern unsigned char modeFlag;
+unsigned char modeFlag;
 
 extern unsigned int bootRomPresent;
 extern unsigned int CPURunning;
@@ -32,6 +77,7 @@ extern unsigned int logging;
 //----------------------------------------//
 // External functions                     //
 //----------------------------------------//
+extern unsigned char* LoadRomFile();
 extern void CheckSDLEvents();
 extern void GetKeys();
 extern unsigned int UpdateFPS(Uint32 interval, void *param);
@@ -42,7 +88,7 @@ extern void WriteToLog();
 signed long int OAMCounter;
 
 // Taken from Visual Boy Advance source.
-unsigned short int daaTable[2048] = {
+unsigned short int daaTable[0x800] = {
 	0x0080,0x0100,0x0200,0x0300,0x0400,0x0500,0x0600,0x0700,
 	0x0800,0x0900,0x1020,0x1120,0x1220,0x1320,0x1420,0x1520,
 	0x1000,0x1100,0x1200,0x1300,0x1400,0x1500,0x1600,0x1700,
@@ -301,7 +347,7 @@ unsigned short int daaTable[2048] = {
 	0x9250,0x9350,0x9450,0x9550,0x9650,0x9750,0x9850,0x9950,
 };
 
-unsigned char cpTable[512] = {
+unsigned char cpTable[0x200] = {
 	0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,
 	0x50,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,
 	0x50,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,
@@ -336,7 +382,7 @@ unsigned char cpTable[512] = {
 	0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x60,
 };
 
-unsigned char zeroTable[256] = {
+unsigned char zeroTable[0x100] = {
 	0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
 	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
 	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
@@ -354,6 +400,66 @@ unsigned char zeroTable[256] = {
 	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
 	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
 };
+
+// Standard Gameboy opcodes
+unsigned char GB_CycleTable[0x100] = { //0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B 0x0C 0x0D 0x0E 0x0F
+								 /*0x00*/  4,  12,   8,   8,   4,   4,   8,   4,  20,   8,   8,   8,   4,   4,   8,   4,
+								 /*0x10*/  4,  12,   8,   8,   4,   4,   8,   4,   8,   8,   8,   8,   4,   4,   8,   4,
+								 /*0x20*/  8,  12,   8,   8,   4,   4,   8,   4,   8,   8,   8,   8,   4,   4,   8,   4,
+								 /*0x30*/  8,  12,   8,   8,  12,  12,  12,   4,   8,   8,   8,   8,   4,   4,   8,   4,
+								 /*0x40*/  4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
+								 /*0x50*/  4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
+								 /*0x60*/  4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
+								 /*0x70*/  8,   8,   8,   8,   8,   8,   4,   8,   4,   4,   4,   4,   4,   4,   8,   4,
+								 /*0x80*/  4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
+								 /*0x90*/  4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
+								 /*0xA0*/  4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
+								 /*0xB0*/  4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
+								 /*0xC0*/  8,  12,  12,  12,  12,  16,   8,  32,   8,   8,  12,   0,  12,  12,   8,  12,
+								 /*0xD0*/  8,  12,  12,   0,  12,  16,   8,  32,   8,   8,  12,   0,  12,   0,   8,  12,    
+								 /*0xE0*/ 12,  12,   8,   0,   0,  16,   8,  32,  16,   4,  16,   0,   0,   0,   8,  12,
+								 /*0xF0*/ 12,  12,   8,   4,   0,  16,   8,  32,  12,   8,  16,   4,   0,   0,   8,  12
+};
+
+// Gameboy bit operation cycles
+unsigned char GB_BitCycleTable[0x100] = {//0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B 0x0C 0x0D 0x0E 0x0F
+								 /*0x00*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+								 /*0x10*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+								 /*0x20*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+								 /*0x30*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+								 /*0x40*/    8,   8,   8,   8,   8,   8,  16,   8,   0,   0,   0,   0,   0,   0,   0,   0,
+								 /*0x50*/    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+								 /*0x60*/    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+								 /*0x70*/    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+								 /*0x80*/    8,   8,   8,   8,   8,   8,  16,   8,   0,   0,   0,   0,   0,   0,   0,   0,
+								 /*0x90*/    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+								 /*0xA0*/    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+								 /*0xB0*/    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+								 /*0xC0*/    8,   8,   8,   8,   8,   8,  16,   8,   0,   0,   0,   0,   0,   0,   0,   0,
+								 /*0xD0*/    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+								 /*0xE0*/    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+								 /*0xF0*/    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0
+};
+
+//Blank 8-bit table for possible future use
+//unsigned char GB_BitCycleTable[0x100] = {//0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B 0x0C 0x0D 0x0E 0x0F
+//	/*0x00*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0x10*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0x20*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0x30*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0x40*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0x50*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0x60*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0x70*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0x80*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0x90*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0xA0*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0xB0*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0xC0*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0xD0*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0xE0*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+//	/*0xF0*/     ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,
+
 
 signed short int dividerCounter;
 signed short int retraceCounter;
@@ -423,6 +529,18 @@ unsigned int SpeedKey = 0;
 unsigned int LCDCInterruptExecuted = 0;
 unsigned int previousPCvalue = 0;
 
+// Moved from GBMemory.c
+//unsigned short int emu.memory.romBank[Register;
+/*unsigned char ramBank[0x20000];
+unsigned char ramBankEnable = 0;
+unsigned char emu.memory.romBank[RegisterLow = 0;
+unsigned char emu.memory.romBank[RegisterHigh = 0;
+unsigned char currentRamBank = 0;
+unsigned char MBCType = 0;
+unsigned char MBC1Model = 0;
+unsigned char modeFlag;*/
+
+
 unsigned int cycleTotal = 0;
 
 unsigned long int emulationTimer;
@@ -438,7 +556,7 @@ char errorText[256];
 // Define all functions used for the Z80  //
 // emulation.                             //
 //----------------------------------------//
-void z80_ADC_A_immediate();
+void z80_ADC_A_value();
 void z80_ADC_A_reg8(unsigned char *reg);
 void z80_ADD_A_immediate();
 void z80_ADD_A_reg8(unsigned char *reg);
@@ -476,9 +594,9 @@ void z80_LD_location_HL_immediate();
 void z80_LD_location_HL_reg8(unsigned char *reg);
 void z80_LD_location_immediate_A();
 void z80_LD_location_SP();
-void z80_LD_reg16_immediate(unsigned char *reg1, unsigned char *reg2);
+void z80_LD_reg16_value(unsigned short int *reg);
 void z80_LD_location_reg16_A(unsigned short int *reg);
-void z80_LD_reg8_immediate(unsigned char *reg);
+void z80_LD_reg8_value(unsigned char *reg);
 void z80_LD_reg8_location_HL(unsigned char *reg);
 void z80_LD_reg8_reg8(unsigned char *reg1, unsigned char *reg2);
 void z80_LD_SP_HL();
@@ -520,10 +638,12 @@ void z80_XOR_reg8(unsigned char *reg);
 // Define all other functions.             //
 //-----------------------------------------//
 void CheckLYC();
-void CPUReset();
+void SystemReset();
 void Draw8PixelLine();
 void DrawScanline();
+int EmulationInitialize(unsigned char *fileBuffer);
 void FillBackgroundBuffer();
+void ClearGBMemory();
 void HandleInterrupts();
 void RunEmulation();
 void UpdateIORegisters();
@@ -535,235 +655,512 @@ void WriteMemory(unsigned short int address, unsigned char data);
 void WriteToLog();
 void ZeroGBMemory();
 
-
-//----------------------------------------//
-// This function will return the CPU to   //
-// its start-up state.                    //
-//----------------------------------------//
-void CPUReset()
+// This will check whether a write to memory is valid and if any special location is written
+void WriteMemory(unsigned short int address, unsigned char data)
 {
-	//----------------------------------------//
-	// Set the 16-bit user register startup   //
-	// values.                                //
-	//----------------------------------------//
-	regs.AF = 0x01B0;
-	regs.BC = 0x0013;
-	regs.DE = 0x00D8;
-	regs.HL = 0x014D;
-
-	//----------------------------------------//
-	// Set the 16-bit pointer register startup//
-	// values.                                //
-	//----------------------------------------//
-	regs.SP = 0xFFFE;
-
-	//----------------------------------------//
-	// Reset the cycle timing counters.       //
-	//----------------------------------------//
-	retraceCounter = 20;
-
-	dividerCounter = DIVIDER_INTERVAL;
-
-	timerCounter = 0;
-
-	interruptLatencyCounter = 0;
-
-	//----------------------------------------//
-	// Reset the cycle counter.               //
-	//----------------------------------------//
-	cycles = 0;
-
-	//----------------------------------------//
-	// Make sure the system isn't halted or   //
-	// stopped.                               //
-	//----------------------------------------//
-	halted = 0;
-	instructionRepeat = 0;
-	stopped = 0;
-
-	modeFlag = 2;
-
-	//----------------------------------------//
-	// Do other stuff.                        //
-	//----------------------------------------//
-	OAMTransferEnabled = 0;
-
-	//----------------------------------------//
-	// Disable interrupts.                    //
-	//----------------------------------------//
-	interruptMasterEnable = 0;
-
-	//----------------------------------------//
-	// Load the base ROM (32K).               //
-	//----------------------------------------//
-	//printf("%d", romBuffer[0x101]);
-	//getch();
-
-	memcpy(&memory[0x0000], &romBuffer[0x0000], 0x8000);
-	
-	// See if boot ROM is present.  PC is set based on boot ROM's presence.
-	/*if (bootRomPresent == 1)
-	{
-		memcpy(&memory[0x0000], &bootBuffer[0x0000], 0x100);
-		
-		regs.PC = 0x0000;
-	}
-	else*/
-	{	
-		regs.PC = 0x0100;
-	}
-
-	switch(memory[0x0147])
-	{
-	case 0x01:
-	case 0x02:
-	case 0x03:
-		MBCType = 1;
-	break;
-	break;
-	break;
-	case 0x05:
-	case 0x06:
-		MBCType = 2;
-	break;
-	break;
-	case 0x0F:
-	case 0x10:
-	case 0x11:
-	case 0x12:
-	case 0x13:
-		MBCType = 3;
-	break;
-	break;
-	break;
-	break;
-	break;
-	case 0x19:
-	case 0x1A:
-	case 0x1B:
-	case 0x1C:
-	case 0x1D:
-	case 0x1E:
-		MBCType = 5;
-	break;
-	break;
-	break;
-	break;
-	break;
-	break;
-	}
-
-	//----------------------------------------//
-	// Set other startup values.  (Still not  //
-	// sure if this is actually needed.)      //
-	//----------------------------------------//
-	IOregister_P1               = 0xFF;
-	IOregister_SB               = 0x00;
-	IOregister_SC               = 0x7E;
-//	memory[0xFF03]              = 0xFF;
-	IOregister_DIV              = 0xAD;
-	IOregister_TIMA             = 0x00;
-	IOregister_TMA              = 0x00;
-	IOregister_TAC              = 0xF8;
-//	memory[0xFF08]              = 0xFF; memory[0xFF09] = 0xFF; memory[0xFF0A] = 0xFF; memory[0xFF0B] = 0xFF; memory[0xFF0C] = 0xFF; memory[0xFF0D] = 0xFF; memory[0xFF0E] = 0xFF;
-	IOregister_IF               = 0xE1;
-	IOregister_NR10             = 0x80;
-	IOregister_NR11             = 0xBF;
-	IOregister_NR12             = 0xF0;
-	IOregister_NR13             = 0xFF;
-	IOregister_NR14             = 0xBF;
-//	memory[0xFF15]              = 0xFF;
-	IOregister_NR21             = 0x3F;
-	IOregister_NR22             = 0x00;
-	IOregister_NR23             = 0xFF;
-	IOregister_NR24             = 0xBF;
-	IOregister_NR30             = 0x7F;
-    IOregister_NR31             = 0xFF;
-	IOregister_NR32             = 0x9F;
-	IOregister_NR33             = 0xFF;
-	IOregister_NR34             = 0xBF;
-//	memory[0xFF1F]              = 0xFF;
-	IOregister_NR41             = 0xFF;
-	IOregister_NR42             = 0x00;
-	IOregister_NR43             = 0x00;
-	IOregister_NR44             = 0xBF;
-	IOregister_NR50             = 0x77;
-	IOregister_NR51             = 0xF3;
-	IOregister_NR52             = 0xF1;
-//	memory[0xFF27]              = 0x00; memory[0xFF28] = 0x00; memory[0xFF29] = 0x00; memory[0xFF2A] = 0x00; memory[0xFF2B] = 0x00; memory[0xFF2C] = 0x00; memory[0xFF2D] = 0x00; memory[0xFF2E] = 0x00; memory[0xFF2F] = 0x00;
-	memory[0xFF30]              = 0x06; memory[0xFF31] = 0xFE; memory[0xFF32] = 0x0E; memory[0xFF33] = 0x7F; memory[0xFF34] = 0x00; memory[0xFF35] = 0xFF; memory[0xFF36] = 0x58; memory[0xFF37] = 0xDF;
-	memory[0xFF38]              = 0x00; memory[0xFF39] = 0xEC; memory[0xFF3A] = 0x00; memory[0xFF3B] = 0xBF; memory[0xFF3C] = 0x0C; memory[0xFF3D] = 0xED; memory[0xFF3E] = 0x03; memory[0xFF3F] = 0xF7;
-	IOregister_LCDC             = 0x91;
-	IOregister_STAT             = 0x80;
-	IOregister_SCY              = 0x00;
-	IOregister_SCX              = 0x00;
-	IOregister_LY               = 0x90;
-	IOregister_LYC              = 0x00;
-	IOregister_DMA              = 0x00;
-	IOregister_BGP              = 0xFC;
-	IOregister_OBP0             = 0xFF;
-	IOregister_OBP1             = 0xFF;
-	IOregister_WY               = 0x00;
-	IOregister_WX               = 0x07;
-/*	memory[0xFF4C]              = 0xFF;
-	memory[0xFF4D]              = 0x7E;
-	memory[0xFF4E]              = 0xFF;
-	memory[0xFF4F]              = 0xFE;
-	memory[0xFF50]              = 0xFF;
-	memory[0xFF51]              = 0x00;
-	memory[0xFF52]              = 0x00;
-	memory[0xFF53]              = 0x00;
-	memory[0xFF54]              = 0x00;
-	memory[0xFF55]              = 0xFF;
-	memory[0xFF56]              = 0x00;
-	memory[0xFF68]              = 0xC0;
-	memory[0xFF69]              = 0xFF;
-	memory[0xFF6A]              = 0xC1;
-	memory[0xFF6B]              = 0x20;
-	memory[0xFF70]              = 0xF8;*/
-	IOregister_IE               = 0x00;
-
-	//aud.Initialize();
+	emu.memory.romBank[address] = data;
 }
+	/*//if (OAMTransferEnabled == 0)
+	{
+		if ((address >= 0x0000) && (address <= 0x1FFF))
+		{
+			// Writing a value of 0xA enables the RAM bank.
+			// This value should only be evaluated, not written.
+			if (data & 0x0A)
+				ramBankEnable = 1;
+			// Anything else disables the RAM bank.
+			else
+				ramBankEnable = 0;
+		}
+
+		// If using MBC, switch ROM bank.
+		else if ((address >= 0x2000) && (address <= 0x3FFF))
+		{
+			// Again, the data should only be evaluated.
+			if (MBCType > 0)
+			{
+				// If using MBC3, the whole ROM bank number is written here.
+				if (MBCType == 3)
+				{
+					emu.memory.romBank[Register = (data & 127);
+				}
+				// If using MBC5, the lower 8-bits are written to 0x2000-0x2FFF.
+				else if ((MBCType == 5) && (address >= 0x2000) && (address <= 0x2FFF))
+				{
+					emu.memory.romBank[RegisterLow = (data & 255);
+				}
+				// If using MBC5, the upper 1-bit is written to 0x3000-0x3FFF.
+				else if ((MBCType == 5) && (address >= 0x3000) && (address <= 0x3FFF))
+				{
+					emu.memory.romBank[RegisterHigh = (data & 1);
+				}
+				else
+				{
+					// Combine the written data with the register.
+					emu.memory.romBank[RegisterLow = (data & 31);
+				}
+
+				if (MBCType == 1)
+				{
+					emu.memory.romBank[Register = (emu.memory.romBank[RegisterHigh << 5) + emu.memory.romBank[RegisterLow;
+
+					if (emu.memory.romBank[Register == 0)
+						emu.memory.romBank[Register++;
+				}
+				else if (MBCType == 2)
+				{
+					emu.memory.romBank[Register = emu.memory.romBank[RegisterLow;
+				}
+				else if (MBCType == 5)
+				{
+					emu.memory.romBank[Register = (emu.memory.romBank[RegisterHigh << 8) + emu.memory.romBank[RegisterLow;
+				}
+
+				// Switch 16K ROM bank into 0x4000.
+				memcpy(&emu.memory.romBank[0x4000], &romBuffer[emu.memory.romBank[Register << 14], 0x4000);
+			}
+		}
+
+		else if ((address >= 0x4000) && (address <= 0x5FFF))
+		{
+			// If the ROM uses MBC.
+			if (MBCType > 0)
+			{
+				// If model is set to 16 Mbit/8K mode.
+				if (((MBCType == 1) && (MBC1Model == 0)))
+				{
+					// Combine the written data with the register.
+					emu.memory.romBank[RegisterHigh = (data & 0x03);
+
+					emu.memory.romBank[Register = (emu.memory.romBank[RegisterHigh << 5) + emu.memory.romBank[RegisterLow;
+
+					// With MBC1, Banks 0x20, 0x40, and 0x60 will access 0x21, 0x41, and 0x61 respectively.
+					if ((emu.memory.romBank[Register & 0x1F) == 0)
+						emu.memory.romBank[Register++;
+
+					// Switch in the current ROM bank.
+					memcpy(&emu.memory.romBank[0x4000], &romBuffer[emu.memory.romBank[Register << 14], 0x4000);
+
+					if (currentRamBank != 0)
+					{
+						// Swap out the old RAM bank.
+						memcpy(&ramBank[currentRamBank << 13], &emu.memory.romBank[0xA000], 0x2000);
+
+						// Swap in RAM bank 0x00.
+						memcpy(&emu.memory.romBank[0xA000], &ramBank[0x0000], 0x2000);
+					}
+				}
+
+				// If model is set to 4 Mbit/32K mode.
+				if (((MBCType == 1) && (MBC1Model == 1)) || (MBCType > 1))
+				{
+					if ((MBCType != 3) || ((MBCType == 3) && (data <= 0x03)))
+					{
+						// Swap out the old RAM bank.
+						memcpy(&ramBank[currentRamBank << 13], &emu.memory.romBank[0xA000], 0x2000);
+
+						// Swap in the new RAM bank.
+						memcpy(&emu.memory.romBank[0xA000], &ramBank[data << 13], 0x2000);
+
+						currentRamBank = data;
+					}
+				}
+			}
+		}
+
+		//----------------------------------------//
+		// If using MBC1, select the memory model //
+		// to use.  (0 = 2048K ROM/8K RAM,        //
+		// 1 = 512K ROM/32K RAM).                 //
+		//----------------------------------------//
+		else if ((address >= 0x6000) && (address <= 0x7FFF))
+		{
+			if (MBCType == 1)
+			{
+				MBC1Model = data & 1;
+			}
+		}
+
+		else if ((address >= 0x8000) && (address <= 0x9FFF))
+		{
+			//----------------------------------------//
+			// Probably don't need to check the mode  //
+			// flags since games shouldn't try writing//
+			// here in the first place.               //
+			//----------------------------------------//
+
+			if (modeFlag != 3)
+			{
+				emu.memory.romBank[address] = data;
+			}
+		}
+
+		else if ((address >= 0xA000) && (address <= 0xBFFF))
+		{
+			if (ramBankEnable == 1)
+			{
+				emu.memory.romBank[address] = data;
+			}
+		}
+
+		else if ((address >= 0xC000) && (address <= 0xDDFF))
+		{
+			emu.memory.romBank[address] = data;
+			emu.memory.romBank[address + 0x2000] = data;
+		}
+
+		else if ((address >= 0xE000) && (address <= 0xFDFF))
+		{
+			emu.memory.romBank[address] = data;
+			emu.memory.romBank[address - 0x2000] = data;
+		}
+
+		else if ((address >= 0xFE00) && (address <= 0xFE9F))
+		{
+			//----------------------------------------//
+			// Probably don't need to check the mode  //
+			// flags since games shouldn't try writing//
+			// here in the first place.               //
+			//----------------------------------------//
+
+			if ((modeFlag != 2) && (modeFlag != 3))
+			{
+				emu.memory.romBank[address] = data;
+			}
+		}
+
+		// This area is restricted.
+		else if ((address >= 0xFEA0) && (address <= 0xFEFF))
+		{
+		}
+
+		// Take care of the joystick register.
+		else if (address == 0xFF00)
+		{
+			// Make sure that only bits 4 and 5 are changed.
+			data &= 48;
+
+			emu.memory.romBank[0xFF00] &= 207;
+			emu.memory.romBank[0xFF00] |= data;
+		}
+
+		else if (address == 0xFF02)
+		{
+			// Don't write to bit 7 since no transfer will be made.
+			data &= 129;
+
+			//emu.memory.romBank[0xFF02] &= 126;
+			emu.memory.romBank[0xFF02] |= data;
+
+			// Since there is not another Gameboy connected, set the received data to 0xFF.
+
+			if ((emu.memory.romBank[0xFF02] & BIT_0) && (emu.memory.romBank[0xFF02] & BIT_7))
+			{
+				emu.memory.romBank[0xFF01] = 0xFF;
+				IOregister_IF |= BIT_3;
+
+				// Turn off bit 7.
+				emu.memory.romBank[0xFF02] &= 127;
+			}
+		}
+
+		else if (address == 0xFF03)
+		{
+		}
+
+		// If the Divider register is written to, reset it.
+		else if (address == 0xFF04)
+		{
+			emu.memory.romBank[0xFF04] = 0;
+
+			dividerCounter = DIVIDER_INTERVAL;
+		}
+
+		else if (address == 0xFF07)
+		{
+			emu.memory.romBank[0xFF07] &= 248;
+			emu.memory.romBank[0xFF07] |= data;
+
+			//----------------------------------------//
+			// Make sure the timer is enabled.        //
+			//----------------------------------------//
+			if (IOregister_TAC & 4)
+			{
+				//----------------------------------------//
+				// Set the timer interval.  I think this  //
+				// area is unnecessarily bulky.           //
+				//----------------------------------------//
+				switch (IOregister_TAC & 3)
+				{
+				case 0x0:
+				{
+					timerInterval = 256; // 4096;
+				}
+				break;
+				case 0x1:
+				{
+					timerInterval = 4; // 262144;
+				}
+				break;
+				case 0x2:
+				{
+					timerInterval = 16; // 65536
+				}
+				break;
+				case 0x3:
+				{
+					timerInterval = 64; // 16384
+				}
+				break;
+				}
+
+				timerCounter = timerInterval;
+			}
+		}
+
+		else if ((address >= 0xFF10) && (address <= 0xFF26))
+		{
+			emu.memory.romBank[address] = data;
+			if (address == 0xFF10)
+			{
+				emu.memory.romBank[0xFF10] = data & 127;
+			}
+			else if (address == 0xFF11)
+			{
+				emu.memory.romBank[0xFF11] = data;
+			}
+			else if (address == 0xFF12)
+			{
+				emu.memory.romBank[0xFF12] = data;
+			}
+			else if (address == 0xFF13)
+			{
+				emu.memory.romBank[0xFF13] = data;
+			}
+			else if (address == 0xFF14)
+			{
+				emu.memory.romBank[0xFF14] = data;
+			}
+			else if (address == 0xFF15)
+			{
+			}
+			else if (address == 0xFF16)
+			{
+				emu.memory.romBank[0xFF16] = data;
+			}
+			else if (address == 0xFF17)
+			{
+				emu.memory.romBank[0xFF17] = data;
+			}
+			else if (address == 0xFF18)
+			{
+				emu.memory.romBank[0xFF18] = data;
+			}
+			else if (address == 0xFF19)
+			{
+				emu.memory.romBank[0xFF19] = data;
+			}
+			else if (address == 0xFF1A)
+			{
+				emu.memory.romBank[0xFF1A] = data & 128;
+			}
+			else if (address == 0xFF1B)
+			{
+				emu.memory.romBank[0xFF1B] = data;
+			}
+			else if (address == 0xFF1C)
+			{
+				emu.memory.romBank[0xFF1C] = data &= 96;
+			}
+			else if (address == 0xFF1D)
+			{
+				emu.memory.romBank[0xFF1D] = data;
+			}
+			else if (address == 0xFF1E)
+			{
+				emu.memory.romBank[0xFF1E] = data;
+			}
+			else if (address == 0xFF20)
+			{
+				emu.memory.romBank[0xFF20] = data & 63;
+			}
+			else if (address == 0xFF21)
+			{
+				emu.memory.romBank[0xFF21] = data;
+			}
+			else if (address == 0xFF22)
+			{
+				emu.memory.romBank[0xFF22] = data;
+			}
+			else if (address == 0xFF23)
+			{
+				emu.memory.romBank[0xFF23] = data & 192;
+			}
+			else if (address == 0xFF24)
+			{
+				emu.memory.romBank[0xFF24] = data;
+			}
+			else if (address == 0xFF25)
+			{
+				emu.memory.romBank[0xFF25] = data;
+			}
+			else if (address == 0xFF26)
+			{
+				emu.memory.romBank[0xFF26] = data & 143;
+			}
+
+			//aud.WriteRegister(address, data);
+		}
+
+		// If there is a write to the LCD Control Register...
+		else if (address == 0xFF40)
+		{
+			emu.memory.romBank[0xFF40] = data;
+
+			if (!(emu.memory.romBank[0xFF40] & BIT_7))
+			{
+				IOregister_LY = 0;
+				LYCounter = VERTICAL_RETRACE_INTERVAL;
+				modeFlag = 2;
+				retraceCounter = 20;
+				tilePosYWin = 0;
+				WYTemp = IOregister_WY;
+				//emu.memory.romBank[0xFF41]
+				CheckLYC();
+
+				// If the display is disabled, clear the screen.
+				//memcpy(&oldScreenData, &screenData, 0x5A00);
+				memset(&screenData, 0, 0x5A00);
+			}
+			//UpdateScreen();
+		}
+
+		// If the STAT register is written to.
+		else if (address == 0xFF41)
+		{
+			// Make sure only allowed bits are written.
+			data &= 120;
+
+			emu.memory.romBank[0xFF41] |= data;
+
+			// Emulate STAT write during HBLANK or VBLANK bug.
+			if ((modeFlag == 0) || (modeFlag == 1))
+			{
+				emu.memory.romBank[0xFF0F] |= BIT_1;
+			}
+		}
+
+		// If the LY register is written to, reset it.
+		else if (address == 0xFF44)
+		{
+			LYCounter = VERTICAL_RETRACE_INTERVAL;
+
+			IOregister_LY = 0;
+
+			CheckLYC();
+		}
+
+		// If the LY Compare register is written to, see if it is equal to LY.
+		else if (address == 0xFF45)
+		{
+			emu.memory.romBank[0xFF45] = data;
+
+			CheckLYC();
+		}
+
+		else if (address == 0xFF46)
+		{
+			memcpy(&emu.memory.romBank[0xFE00], &emu.memory.romBank[(emu.cpu.regs.A << 8)], 0xA0);
+
+			// OAM transfer lasts for approx 168 cycles.
+			//OAMCounter = 168;
+
+			//OAMTransferEnabled = 1;
+		}
+
+		else if (address == 0xFF47)
+		{
+		}
+
+		else if (address == 0xFF48)
+		{
+		}
+
+		else if (address == 0xFF49)
+		{
+		}
+
+		/*	// This area is restricted.  (0xFF50 may be used for turning off boot rom.)
+		else if ((address >= 0xFF4C) && (address <= 0xFF7F))
+		{
+		if (address == 0xFF50)
+		{
+		if (data == 1)
+		{
+		// Overwrite the bootrom in the ROM buffer.
+		memcpy(&emu.memory.romBank[0x0000], &romBuffer[0x0000], 0x100);
+		}
+		}
+		}
+		else
+		{
+		emu.memory.romBank[address] = data;
+		}
+		}
+		else if ((address >= 0xFF80) && (address <= 0xFFFE))
+		{
+		emu.memory.romBank[address] = data;
+		}
+		}*/
+
+void ClearGBMemory()
+{
+}
+
+void SystemReset()
+{
+
+}
+
 
 //----------------------------------------//
 // This instruction will add a given value//
 // plus the carry flag to register A.     //
 //----------------------------------------//
-void z80_ADC_A_immediate()
+void z80_ADC_A_value()
 {
-	// If there will be a carry from bit 3, set flag H, otherwise
+	unsigned char regA = emu.cpu.regs.AF & 0xFF00;
+	unsigned char value = emu.memory.romBank[emu.cpu.regs.PC];
+	
+	// If there is a carry from bit 3, set flag H, otherwise
 	// reset it.
-	if (((regs.A & 0xF) + (memory[regs.PC] & 0xF) + FLAG_C) > 0xF)
-		regs.F |= FLAG_H_ON;
+	if (((regA & 0xF) + (value & 0xF) + FLAG_C) > 0xF)
+		emu.cpu.regs.AF |= FLAG_H_ON;
 	else
-		regs.F &= FLAG_H_OFF;
+		emu.cpu.regs.AF &= FLAG_H_OFF;
 
 	// If there will be a carry from bit 7, set flag C, otherwise
 	// reset it.
-	if ((regs.A + memory[regs.PC] + FLAG_C) > 0xFF)
+	if ((regA + emu.memory.romBank[emu.cpu.regs.PC] + FLAG_C) > 0xFF)
 	{
-		regs.A += memory[regs.PC] + FLAG_C;
-		regs.F |= FLAG_C_ON;
+		emu.cpu.regs.AF += emu.memory.romBank[emu.cpu.regs.PC] << 8;
+		emu.cpu.regs.AF |= FLAG_C_ON;
 	}
 	else
 	{
-		regs.A += memory[regs.PC] + FLAG_C;
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.AF += emu.memory.romBank[emu.cpu.regs.PC] << 8;
+		emu.cpu.regs.AF &= FLAG_C_OFF;
 	}
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];
+	emu.cpu.regs.AF &= 127;
+	emu.cpu.regs.AF |= zeroTable[(emu.cpu.regs.AF & 0xFF00) >> 8];
 
 	// Flag N is reset.
-	regs.F &= FLAG_N_OFF;
+	emu.cpu.regs.AF &= FLAG_N_OFF;
 	
-	// Increment Program Counter.
-	regs.PC++;
-
-	// Instruction uses 2 machine cycles.
-	cycles += 2;
+	// Increment Program Counter to skip read value.
+	emu.cpu.regs.PC++;
 }
 
 //----------------------------------------//
@@ -773,32 +1170,33 @@ void z80_ADC_A_immediate()
 //----------------------------------------//
 void z80_ADC_A_reg8(unsigned char *reg)
 {
+	unsigned int regA = emu.cpu.regs.AF & 0xFF00;
 	// If there will be a carry from bit 3, set flag H, otherwise
 	// reset it.
-	if (((regs.A & 0xF) + (*reg & 0xF) + FLAG_C) > 0xF)
-		regs.F |= FLAG_H_ON;
+	if (((emu.cpu.regs.A & 0xF) + (*reg & 0xF) + FLAG_C) > 0xF)
+		emu.cpu.regs.AF |= FLAG_H_ON;
 	else
-		regs.F &= FLAG_H_OFF;
+		emu.cpu.regs.AF &= FLAG_H_OFF;
 
 	// If there will be a carry from bit 7, set flag C, otherwise
 	// reset it.
-	if ((regs.A + *reg + FLAG_C) > 0xFF)
+	if ((emu.cpu.regs.AF + *reg + FLAG_C) > 0xFF)
 	{
-		regs.A += *reg + FLAG_C;
-		regs.F |= FLAG_C_ON;
+		emu.cpu.regs.A += *reg + FLAG_C;
+		emu.cpu.regs.F |= FLAG_C_ON;
 	}
 	else
 	{
-		regs.A += *reg + FLAG_C;
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.A += *reg + FLAG_C;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 	}
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.A];
 
 	// Flag N is reset.
-	regs.F &= FLAG_N_OFF;
+	emu.cpu.regs.F &= FLAG_N_OFF;
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0x8E)
@@ -815,29 +1213,29 @@ void z80_ADD_A_immediate()
 {
 	// If there will be a carry from bit 3, set flag H, otherwise
 	// reset it.
-	if (((regs.A & 0xF) + (memory[regs.PC] & 0xF)) > 0xF)
-		regs.F |= FLAG_H_ON;
+	if (((emu.cpu.regs.A & 0xF) + (emu.memory.romBank[emu.cpu.regs.PC] & 0xF)) > 0xF)
+		emu.cpu.regs.F |= FLAG_H_ON;
 	else
-		regs.F &= FLAG_H_OFF;
+		emu.cpu.regs.F &= FLAG_H_OFF;
 
 	// If there will be a carry from bit 7, set flag C, otherwise
 	// reset it.
-	if ((regs.A + memory[regs.PC]) > 0xFF)
-		regs.F |= FLAG_C_ON;
+	if ((emu.cpu.regs.A + emu.memory.romBank[emu.cpu.regs.PC]) > 0xFF)
+		emu.cpu.regs.F |= FLAG_C_ON;
 	else
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 	
 	// Add *reg to register A.
-	regs.A += memory[regs.PC];
+	emu.cpu.regs.A += emu.memory.romBank[emu.cpu.regs.PC];
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.A];
 
 	// Flag N is reset.
-	regs.F &= FLAG_N_OFF;
+	emu.cpu.regs.F &= FLAG_N_OFF;
 
-	regs.PC++;
+	emu.cpu.regs.PC++;
 
 	// Instruction uses 2 machine cycles.
 	cycles += 2;
@@ -851,27 +1249,27 @@ void z80_ADD_A_reg8(unsigned char *reg)
 {
 	// If there will be a carry from bit 3, set flag H, otherwise
 	// reset it.
-	if (((regs.A & 0xF) + (*reg & 0xF)) > 0xF)
-		regs.F |= FLAG_H_ON;
+	if (((emu.cpu.regs.A & 0xF) + (*reg & 0xF)) > 0xF)
+		emu.cpu.regs.F |= FLAG_H_ON;
 	else
-		regs.F &= FLAG_H_OFF;
+		emu.cpu.regs.F &= FLAG_H_OFF;
 
 	// If there will be a carry from bit 7, set flag C, otherwise
 	// reset it.
-	if ((regs.A + *reg) > 0xFF)
-		regs.F |= FLAG_C_ON;
+	if ((emu.cpu.regs.A + *reg) > 0xFF)
+		emu.cpu.regs.F |= FLAG_C_ON;
 	else
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 	
 	// Add *reg to register A.
-	regs.A += *reg;
+	emu.cpu.regs.A += *reg;
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.A];
 
 	// Flag N is reset.
-	regs.F &= FLAG_N_OFF;
+	emu.cpu.regs.F &= FLAG_N_OFF;
 
 	// Machine cycles used is dependent on opcode
 	if (opcode == 0x86)
@@ -886,28 +1284,23 @@ void z80_ADD_A_reg8(unsigned char *reg)
 //----------------------------------------//
 void z80_ADD_HL_reg16(unsigned short int *reg)
 {
-	// If there will be a carry from bit 3, set flag H, otherwise
-	// reset it.
-	if (((regs.H & 0xF) <= 0xF) && (((regs.H + *reg) & 0x10) >= 0x10))
-		regs.F |= FLAG_H_ON;
+	// If there will be a carry from bit 11, set flag H.
+	if ((unsigned short int)(emu.cpu.regs.HL + *reg) & BIT_11)
+		emu.cpu.regs.F |= FLAG_H_ON;
 	else
-		regs.F &= FLAG_H_OFF;
+		emu.cpu.regs.F |= FLAG_H_OFF;
 
-	// If there will be a carry from bit 15, set flag C, otherwise
-	// reset it.
-	if ((regs.HL + *reg) > 0xFFFF)
-		regs.F |= FLAG_C_ON;
+	// If there will be a carry from bit 15, set flag C.
+	if ((unsigned short int)(emu.cpu.regs.HL + *reg) & BIT_15)
+		emu.cpu.regs.F |= FLAG_C_ON;
 	else
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F |= FLAG_C_OFF;
 	
 	// Add *reg to HL.
-	regs.HL += *reg;
+	emu.cpu.regs.HL += *reg;
 
 	// Flag N is reset.
-	regs.F &= FLAG_N_OFF;
-
-	// Instruction uses 2 machine cycles
-	cycles += 2;
+	emu.cpu.regs.F &= FLAG_N_OFF;
 }
 
 //----------------------------------------//
@@ -918,22 +1311,22 @@ void z80_ADD_HL_reg16(unsigned short int *reg)
 void z80_ADD_SP_immediate()
 {
 	// Turn on flag C if the result is above 0xFFFF, or below 0x0000.
-	if (((regs.SP + (signed char)memory[regs.PC]) > 0xFFFF) || ((regs.SP + (signed char)memory[regs.PC]) < 0x0000))
-		regs.F |= FLAG_C_ON;
+	if (((emu.cpu.regs.SP + (signed char)emu.memory.romBank[emu.cpu.regs.PC]) > 0xFFFF) || ((emu.cpu.regs.SP + (signed char)emu.memory.romBank[emu.cpu.regs.PC]) < 0x0000))
+		emu.cpu.regs.F |= FLAG_C_ON;
 	else
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 
-	regs.SP += (signed char)memory[regs.PC];
+	emu.cpu.regs.SP += (signed char)emu.memory.romBank[emu.cpu.regs.PC];
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.SP];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.SP];
 
 	// Flag N is reset.
-	regs.F &= FLAG_N_OFF;
+	emu.cpu.regs.F &= FLAG_N_OFF;
 
 	// Increment Program Counter.
-	regs.PC++;
+	emu.cpu.regs.PC++;
 
 	// Instruction uses 4 machine cycles.
 	cycles += 4;
@@ -946,20 +1339,20 @@ void z80_ADD_SP_immediate()
 void z80_AND_immediate()
 {
 	// Logically AND register A with an immediate value.
-	regs.A &= memory[regs.PC];
+	emu.cpu.regs.A &= emu.memory.romBank[emu.cpu.regs.PC];
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.A];
 
 	// Increment Program Counter.
-	regs.PC++;
+	emu.cpu.regs.PC++;
 	
 	// Flag_H is set.
-	regs.F |= FLAG_H_ON;
+	emu.cpu.regs.F |= FLAG_H_ON;
 
 	// Flags N and C are reset.
-	regs.F &= (FLAG_Z_ON | FLAG_H_ON);
+	emu.cpu.regs.F &= (FLAG_Z_ON | FLAG_H_ON);
 
 	// Instruction uses 2 machine cycles.
 	cycles += 2;
@@ -972,17 +1365,17 @@ void z80_AND_immediate()
 void z80_AND_reg8(unsigned char *reg)
 {
 	// Logically AND register A with *reg.
-	regs.A &= *reg;
+	emu.cpu.regs.A &= *reg;
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.A];
 
 	// Flag_H is set.
-	regs.F |= FLAG_H_ON;
+	emu.cpu.regs.F |= FLAG_H_ON;
 
 	// Flags N and C are reset.
-	regs.F &= (FLAG_Z_ON | FLAG_H_ON);
+	emu.cpu.regs.F &= (FLAG_Z_ON | FLAG_H_ON);
 
 	// Machine cycles used is dependant on opcode
 	if (opcode == 0xA6)
@@ -998,14 +1391,14 @@ void z80_AND_reg8(unsigned char *reg)
 void z80_BIT_bit_reg8(unsigned char bit, unsigned char *reg)
 {
 	// Test the bit.  If it is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[*reg & bit];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[*reg & bit];
 
 	// Flag N is reset.
-	regs.F &= FLAG_N_OFF;
+	emu.cpu.regs.F &= FLAG_N_OFF;
 
 	// Flag H is set.
-	regs.F |= FLAG_H_ON;
+	emu.cpu.regs.F |= FLAG_H_ON;
 
 	// Flag C might need adjusted.
 
@@ -1063,23 +1456,23 @@ void z80_CALL_condition_immediate(unsigned char condition)
 	}
 
 	// Skip over the 16-bit address.
-	regs.PC += 2;
+	emu.cpu.regs.PC += 2;
 
-	if(conditionTrue == 1)
+	/*if(conditionTrue == 1)
 	{
 		// Store the address of the next instruction on the stack.
-		regs.SP--;
-		WriteMemory(regs.SP, regs.PCH);
-		regs.SP--;
-		WriteMemory(regs.SP, regs.PCL);
+		emu.cpu.regs.SP--;
+		WriteMemory(emu.cpu.regs.SP, emu.cpu.regs.PCH);
+		emu.cpu.regs.SP--;
+		WriteMemory(emu.cpu.regs.SP, emu.cpu.regs.PCL);
 
 		// Reset PC to it's original value to get the jump address.
-		regs.PC -= 2;
+		emu.cpu.regs.PC -= 2;
 		
-		regs.PC = (memory[regs.PC + 1] << 8) + memory[regs.PC];
+		emu.cpu.regs.PC = (emu.memory.romBank[emu.cpu.regs.PC + 1] << 8) + emu.memory.romBank[emu.cpu.regs.PC];
 
 		cycles += 3;
-	}
+	}*/
 
 	cycles += 3;
 }
@@ -1092,19 +1485,19 @@ void z80_CALL_condition_immediate(unsigned char condition)
 void z80_CALL_immediate()
 {
 	// Skip over the 16-bit address.
-	regs.PC += 2;
+	emu.cpu.regs.PC += 2;
 
 	// Push address of next instruction onto the stack.
-	regs.SP--;
-	WriteMemory(regs.SP, regs.PCH);
-	regs.SP--;
-	WriteMemory(regs.SP, regs.PCL);
+	emu.cpu.regs.SP--;
+	WriteMemory(emu.cpu.regs.SP, emu.cpu.regs.PC);
+	emu.cpu.regs.SP--;
+	WriteMemory(emu.cpu.regs.SP, emu.cpu.regs.PC);
 
 	// Reset PC to it's original value to get the jump address.
-	regs.PC -= 2;
+	emu.cpu.regs.PC -= 2;
 
 	// Load new address into Program Counter.
-	regs.PC = (memory[regs.PC + 1] << 8) + memory[regs.PC];
+	emu.cpu.regs.PC = (emu.memory.romBank[emu.cpu.regs.PC + 1] << 8) + emu.memory.romBank[emu.cpu.regs.PC];
 
 	// Instruction uses 6 cycles.
 	cycles += 6;
@@ -1117,10 +1510,10 @@ void z80_CALL_immediate()
 void z80_CCF()
 {
 	// Complement flag C.
-	regs.F ^= 0x10;
+	emu.cpu.regs.F ^= 0x10;
 
 	// Flags N and H are reset.
-	regs.F &= (FLAG_Z_ON | FLAG_C_ON);
+	emu.cpu.regs.F &= (FLAG_Z_ON | FLAG_C_ON);
 
 	// Instruction uses 1 machine cycle.
 	cycles += 1;
@@ -1133,10 +1526,10 @@ void z80_CCF()
 void z80_CP_immediate()
 {
 	// Adding 255 makes sure the index is never below 0.
-	regs.F = cpTable[(regs.A - memory[regs.PC]) + 255];
+	emu.cpu.regs.F = cpTable[(emu.cpu.regs.A - emu.memory.romBank[emu.cpu.regs.PC]) + 255];
 
 	// Increment Program Counter.
-	regs.PC++;
+	emu.cpu.regs.PC++;
 
 	// Machine cycles used is dependant on opcode.
 	cycles += 2;
@@ -1149,7 +1542,7 @@ void z80_CP_immediate()
 void z80_CP_reg8(unsigned char *reg)
 {
 	// Adding 255 makes sure the index is never below 0.
-	regs.F = cpTable[(regs.A - *reg) + 255];	
+	emu.cpu.regs.F = cpTable[(emu.cpu.regs.A - *reg) + 255];	
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0xBE)
@@ -1165,10 +1558,10 @@ void z80_CP_reg8(unsigned char *reg)
 void z80_CPL()
 {
 	// Exclusive OR register A with 0xFF, this will flip the bits.
-	regs.A ^= 0xFF;
+	emu.cpu.regs.A ^= 0xFF;
 
 	// Flags N and H are set
-	regs.F |= (FLAG_N_ON | FLAG_H_ON);
+	emu.cpu.regs.F |= (FLAG_N_ON | FLAG_H_ON);
 
 	// Instruction uses 1 machine cycle.
 	cycles += 1;
@@ -1180,7 +1573,7 @@ void z80_CPL()
 //----------------------------------------//
 void z80_DAA()
 {
-	unsigned short int lookupIndex = regs.A;
+	unsigned short int lookupIndex = emu.cpu.regs.A;
 
 	if (FLAG_C)
 		lookupIndex |= 256;
@@ -1189,7 +1582,8 @@ void z80_DAA()
 	if (FLAG_N)
 		lookupIndex |= 1024;
 
-	regs.AF = daaTable[lookupIndex];
+	emu.cpu.regs.A = daaTable[lookupIndex] & 0xFF00;
+	emu.cpu.regs.F = daaTable[lookupIndex] & 0x00FF;
 
 	//----------------------------------------//
 	// This will no longer be used, as a      //
@@ -1202,39 +1596,39 @@ void z80_DAA()
 	
 	if (FLAG_N) // If Negative Flag Set 
 	{
-		if ((regs.A & 0x0F) > 0x09 || FLAG_H) 
+		if ((emu.cpu.regs.A & 0x0F) > 0x09 || FLAG_H) 
 		{
-			regs.A -=0x06; //Half borrow: (0-1) = (0xF-0x6) = 9 
-			if ((regs.A & 0xF0) == 0xF0)
-				regs.F |= FLAG_C_ON;
+			emu.cpu.regs.A -=0x06; //Half borrow: (0-1) = (0xF-0x6) = 9 
+			if ((emu.cpu.regs.A & 0xF0) == 0xF0)
+				emu.cpu.regs.F |= FLAG_C_ON;
 			else
-				regs.F &= FLAG_C_OFF;
+				emu.cpu.regs.F &= FLAG_C_OFF;
 		}
 		
-		if ((regs. A & 0xF0) > 0x90 || FLAG_C)
-			regs.A -= 0x60;
+		if ((emu.cpu.regs. A & 0xF0) > 0x90 || FLAG_C)
+			emu.cpu.regs.A -= 0x60;
 	}
 	else
 	{
-		if ((regs.A & 0x0F) > 0x09 || FLAG_H)
+		if ((emu.cpu.regs.A & 0x0F) > 0x09 || FLAG_H)
 		{
-			regs.A += 0x06; //Half carry: (9+1) = (0xA+0x6) = 10
-			if ((regs.A & 0xF0) == 0)
-				regs.F |= FLAG_C_ON;
+			emu.cpu.regs.A += 0x06; //Half carry: (9+1) = (0xA+0x6) = 10
+			if ((emu.cpu.regs.A & 0xF0) == 0)
+				emu.cpu.regs.F |= FLAG_C_ON;
 			else
-				regs.F &= FLAG_C_OFF; 
+				emu.cpu.regs.F &= FLAG_C_OFF; 
         }
 		
-		if ((regs.A & 0xF0) > 0x90 || FLAG_C)
-			regs.A += 0x60;
+		if ((emu.cpu.regs.A & 0xF0) > 0x90 || FLAG_C)
+			emu.cpu.regs.A += 0x60;
 	}
 
-    if(regs.A == 0)
-		regs.F |= FLAG_Z_ON;
+    if(emu.cpu.regs.A == 0)
+		emu.cpu.regs.F |= FLAG_Z_ON;
 	else
-		regs.F &= FLAG_Z_OFF;
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];*/
+		emu.cpu.regs.F &= FLAG_Z_OFF;
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.A];*/
 
 	cycles += 1;
 }
@@ -1245,19 +1639,19 @@ void z80_DAA()
 //----------------------------------------//
 void z80_DEC_location_HL()
 {	
-	WriteMemory(regs.HL, memory[regs.HL] - 1);
+	WriteMemory(emu.cpu.regs.HL, emu.memory.romBank[emu.cpu.regs.HL] - 1);
 
-	if ((memory[regs.HL] & 0xF) == 0xF)
-		regs.F |= FLAG_H_ON;
+	if ((emu.memory.romBank[emu.cpu.regs.HL] & 0xF) == 0xF)
+		emu.cpu.regs.F |= FLAG_H_ON;
 	else
-		regs.F &= FLAG_H_OFF;
+		emu.cpu.regs.F &= FLAG_H_OFF;
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[memory[regs.HL]];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.memory.romBank[emu.cpu.regs.HL]];
 
 	// Instruction turns on flag N.
-	regs.F |= FLAG_N_ON;
+	emu.cpu.regs.F |= FLAG_N_ON;
 	
 	// Instruction uses 3 machine cycles.
 	cycles += 3;
@@ -1269,11 +1663,7 @@ void z80_DEC_location_HL()
 //----------------------------------------//
 void z80_DEC_reg16(unsigned short int *reg)
 {
-	// Decrement *reg.
-	*reg -= 1;
 
-	// Instruction uses 2 machine cycles.
-	cycles += 2;
 }
 
 //----------------------------------------//
@@ -1286,16 +1676,16 @@ void z80_DEC_reg8(unsigned char *reg)
 	*reg -= 1;
 
 	if ((*reg & 0xF) == 0xF)
-		regs.F |= FLAG_H_ON;
+		emu.cpu.regs.F |= FLAG_H_ON;
 	else
-		regs.F &= FLAG_H_OFF;
+		emu.cpu.regs.F &= FLAG_H_OFF;
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[*reg];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[*reg];
 	
 	// Turn on flag N.
-	regs.F |= FLAG_N_ON;
+	emu.cpu.regs.F |= FLAG_N_ON;
 
 	// Instruction uses 1 machine cycle.
 	cycles += 1;
@@ -1341,7 +1731,7 @@ void z80_HALT()
 		halted = 1;
 		if ((IOregister_IF & IOregister_IE) > 0)
 		{
-			regs.PC--;
+			emu.cpu.regs.PC--;
 		}
 		else
 		{
@@ -1366,20 +1756,20 @@ void z80_HALT()
 void z80_INC_location_HL()
 {
 	// See if there will be a carry from bit 3, if there was, set flag H.
-	if ((memory[regs.HL] & 0xF) == 0xF)
-		regs.F |= FLAG_H_ON;
+	if ((emu.memory.romBank[emu.cpu.regs.HL] & 0xF) == 0xF)
+		emu.cpu.regs.F |= FLAG_H_ON;
 	else
-		regs.F &= FLAG_H_OFF;
+		emu.cpu.regs.F &= FLAG_H_OFF;
 
 	// Add 1 to the value at the address in register HL.
-	WriteMemory(regs.HL, memory[regs.HL] + 1);
+	WriteMemory(emu.cpu.regs.HL, emu.memory.romBank[emu.cpu.regs.HL] + 1);
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[memory[regs.HL]];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.memory.romBank[emu.cpu.regs.HL]];
 	
 	// Turn off flag N.
-	regs.F &= FLAG_N_OFF;
+	emu.cpu.regs.F &= FLAG_N_OFF;
 
 	// Instruction uses 3 machine cycles.
 	cycles += 3;
@@ -1391,10 +1781,13 @@ void z80_INC_location_HL()
 //----------------------------------------//
 void z80_INC_reg16(unsigned short int *reg)
 {
-	*reg += 1;
-	
-	// Instruction uses 2 machine cycles.
-	cycles += 2;
+	if (*reg == 0xFF)
+	{
+		*reg = 0;
+		*reg++;
+	}
+	else
+		*reg++;
 }
 
 //----------------------------------------//
@@ -1404,19 +1797,19 @@ void z80_INC_reg16(unsigned short int *reg)
 void z80_INC_reg8(unsigned char *reg)
 {
 	if ((*reg & 0xF) == 0xF)
-		regs.F |= FLAG_H_ON;
+		emu.cpu.regs.F |= FLAG_H_ON;
 	else
-		regs.F &= FLAG_H_OFF;
+		emu.cpu.regs.F &= FLAG_H_OFF;
 
 	// Add 1 to *reg.
 	*reg += 1;
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[*reg];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[*reg];
 	
 	// Turn off flag N.
-	regs.F &= FLAG_N_OFF;
+	emu.cpu.regs.F &= FLAG_N_OFF;
 
 	// Instruction uses 1 machine cycle.
 	cycles += 1;
@@ -1436,11 +1829,11 @@ void z80_JP_condition_immediate(unsigned char condition)
 		{
 			if (!FLAG_Z)
 			{
-				regs.PC = (memory[regs.PC + 1] << 8) + memory[regs.PC];
+				emu.cpu.regs.PC = (emu.memory.romBank[emu.cpu.regs.PC + 1] << 8) + emu.memory.romBank[emu.cpu.regs.PC];
 				cycles += 1;
 			}
 			else
-				regs.PC += 2;
+				emu.cpu.regs.PC += 2;
 		}
 	break;
 	// If the Z flag is on, jump to the address.
@@ -1448,11 +1841,11 @@ void z80_JP_condition_immediate(unsigned char condition)
 		{
 			if (FLAG_Z)
 			{
-				regs.PC = (memory[regs.PC + 1] << 8) + memory[regs.PC];
+				emu.cpu.regs.PC = (emu.memory.romBank[emu.cpu.regs.PC + 1] << 8) + emu.memory.romBank[emu.cpu.regs.PC];
 				cycles += 1;
 			}
 			else
-				regs.PC += 2;
+				emu.cpu.regs.PC += 2;
 		}
 	break;
 	// If the C flag is off, jump to the address.
@@ -1460,11 +1853,11 @@ void z80_JP_condition_immediate(unsigned char condition)
 		{
 			if (!FLAG_C)
 			{
-				regs.PC = (memory[regs.PC + 1] << 8) + memory[regs.PC];
+				emu.cpu.regs.PC = (emu.memory.romBank[emu.cpu.regs.PC + 1] << 8) + emu.memory.romBank[emu.cpu.regs.PC];
 				cycles += 1;
 			}
 			else
-				regs.PC += 2;
+				emu.cpu.regs.PC += 2;
 		}
 	break;
 	// If the C flag is on, jump to the address.
@@ -1472,11 +1865,11 @@ void z80_JP_condition_immediate(unsigned char condition)
 		{
 			if (FLAG_C)
 			{
-				regs.PC = (memory[regs.PC + 1] << 8) + memory[regs.PC];
+				emu.cpu.regs.PC = (emu.memory.romBank[emu.cpu.regs.PC + 1] << 8) + emu.memory.romBank[emu.cpu.regs.PC];
 				cycles += 1;
 			}
 			else
-				regs.PC += 2;
+				emu.cpu.regs.PC += 2;
 		}
 	break;
 	}
@@ -1492,13 +1885,13 @@ void z80_JP_immediate()
 {
 	if (opcode == 0xE9)  // JP HL
 	{
-		regs.PC = regs.HL;
+		emu.cpu.regs.PC = emu.cpu.regs.HL;
 		
 		cycles += 1;
 	}
 	else  // JP, nnnn
 	{
-		regs.PC = (memory[regs.PC + 1] << 8) + memory[regs.PC];
+		emu.cpu.regs.PC = (emu.memory.romBank[emu.cpu.regs.PC + 1] << 8) + emu.memory.romBank[emu.cpu.regs.PC];
 
 		cycles += 4;
 	}
@@ -1518,7 +1911,7 @@ void z80_JR_condition_offset(unsigned char condition)
 		{
 			if (!FLAG_Z)
 			{
-				regs.PC += (signed char)memory[regs.PC];
+				emu.cpu.regs.PC += (signed char)emu.memory.romBank[emu.cpu.regs.PC];
 				cycles += 1;
 			}
 		}
@@ -1527,7 +1920,7 @@ void z80_JR_condition_offset(unsigned char condition)
 		{
 			if (FLAG_Z)
 			{
-				regs.PC += (signed char)memory[regs.PC];
+				emu.cpu.regs.PC += (signed char)emu.memory.romBank[emu.cpu.regs.PC];
 				cycles += 1;
 			}
 		}
@@ -1536,7 +1929,7 @@ void z80_JR_condition_offset(unsigned char condition)
 		{
 			if (!FLAG_C)
 			{
-				regs.PC += (signed char)memory[regs.PC];
+				emu.cpu.regs.PC += (signed char)emu.memory.romBank[emu.cpu.regs.PC];
 				cycles += 1;
 			}
 		}
@@ -1545,7 +1938,7 @@ void z80_JR_condition_offset(unsigned char condition)
 		{
 			if (FLAG_C)
 			{
-				regs.PC += (signed char)memory[regs.PC];
+				emu.cpu.regs.PC += (signed char)emu.memory.romBank[emu.cpu.regs.PC];
 				cycles += 1;
 			}
 		}
@@ -1553,7 +1946,7 @@ void z80_JR_condition_offset(unsigned char condition)
 	}
 
 	// Increment the Program Counter.
-	regs.PC++;
+	emu.cpu.regs.PC++;
 
 	// Instruction uses 2 machine cycles.
 	cycles += 2;
@@ -1566,10 +1959,10 @@ void z80_JR_condition_offset(unsigned char condition)
 void z80_JR_offset()
 {
 	// Disposition Program Counter.
-	regs.PC += (signed char)memory[regs.PC];
+	emu.cpu.regs.PC += (signed char)emu.memory.romBank[emu.cpu.regs.PC];
 
 	// Increment Program Counter.
-	regs.PC++;
+	emu.cpu.regs.PC++;
 
 	// Instruction uses 3 machine cycles.
 	cycles += 3;
@@ -1582,9 +1975,9 @@ void z80_JR_offset()
 void z80_LD_A_location_immediate()
 {
 	// Load data at location into register A.
-	regs.A = memory[(memory[regs.PC + 1] << 8) + memory[regs.PC]];
+	emu.cpu.regs.A = emu.memory.romBank[(emu.memory.romBank[emu.cpu.regs.PC + 1] << 8) + emu.memory.romBank[emu.cpu.regs.PC]];
 	// Skip over the 16-bit address.
-	regs.PC += 2;
+	emu.cpu.regs.PC += 2;
 
 	// Instruction uses 4 machine cycles.
 	cycles += 4;
@@ -1598,7 +1991,7 @@ void z80_LD_A_location_immediate()
 void z80_LD_A_0xFF00_C()
 {
 	// Load the value at 0xFF00 + register C into register A.
-	regs.A = memory[0xFF00 + regs.C];
+	emu.cpu.regs.A = emu.memory.romBank[0xFF00 + emu.cpu.regs.C];
 
 	// Instruction uses 2 machine cycles.
 	cycles += 2;
@@ -1612,10 +2005,10 @@ void z80_LD_A_0xFF00_C()
 void z80_LD_A_0xFF00_immediate()
 {
 	// Load the value at 0xFF00 + immediate into register A.
-	regs.A = memory[0xFF00 + memory[regs.PC]];
+	emu.cpu.regs.A = emu.memory.romBank[0xFF00 + emu.memory.romBank[emu.cpu.regs.PC]];
 
 	// Increment Program Counter.
-	regs.PC++;
+	emu.cpu.regs.PC++;
 
 	// Flags might need edited.
 
@@ -1630,13 +2023,13 @@ void z80_LD_A_0xFF00_immediate()
 void z80_LD_A_location_reg16(unsigned short int *reg)
 {
 	// Load A with the value at the address in *reg.
-	regs.A = memory[*reg];
+	emu.cpu.regs.A = emu.memory.romBank[*reg];
 
 	// If the register was HL, increment it.
 	if (opcode == 0x2A)
-		regs.HL++;
+		emu.cpu.regs.HL++;
 	else if (opcode == 0x3A)
-		regs.HL--;
+		emu.cpu.regs.HL--;
 	
 	// Instruction uses 2 machine cycles.
 	cycles += 2;
@@ -1650,15 +2043,15 @@ void z80_LD_A_location_reg16(unsigned short int *reg)
 void z80_LD_HL_SP_immediate()
 {
 	// Load the Stack Pointer + value into register HL.
-	regs.HL = regs.SP + (signed char)memory[regs.PC];
+	emu.cpu.regs.HL = emu.cpu.regs.SP + (signed char)emu.memory.romBank[emu.cpu.regs.PC];
 
 	// Flags H and C need to be adjusted.
 
 	// Reset flags Z and N.
-	regs.F &= (FLAG_H_ON | FLAG_C_ON);
+	emu.cpu.regs.F &= (FLAG_H_ON | FLAG_C_ON);
 
 	// Increment Program Counter.
-	regs.PC++;
+	emu.cpu.regs.PC++;
 
 	// Instruction uses 3 cycles.
 	cycles += 3;
@@ -1671,10 +2064,10 @@ void z80_LD_HL_SP_immediate()
 void z80_LD_location_HL_immediate()
 {
 	// Load the address in HL with the immediate value
-	WriteMemory(regs.HL, memory[regs.PC]);
+	WriteMemory(emu.cpu.regs.HL, emu.memory.romBank[emu.cpu.regs.PC]);
 
 	// Increment the Program Counter to skip over the 8-bit value.
-	regs.PC++;
+	emu.cpu.regs.PC++;
 
 	// Instruction uses 3 machine cycles
 	cycles += 3;
@@ -1688,7 +2081,7 @@ void z80_LD_location_HL_immediate()
 void z80_LD_location_HL_reg8(unsigned char *reg)
 {
 	// Load *reg into the address in register HL
-	WriteMemory(regs.HL, *reg);
+	WriteMemory(emu.cpu.regs.HL, *reg);
 
 	// Instruction uses 2 cycles.
 	cycles += 2;
@@ -1702,10 +2095,10 @@ void z80_LD_location_HL_reg8(unsigned char *reg)
 void z80_LD_location_immediate_A()
 {
 	// Load register A into the location.
-	WriteMemory(((memory[regs.PC + 1]) << 8) + memory[regs.PC], regs.A);
+	WriteMemory(((emu.memory.romBank[emu.cpu.regs.PC + 1]) << 8) + emu.memory.romBank[emu.cpu.regs.PC], emu.cpu.regs.A);
 
 	// Skip over the 16-bit address.
-	regs.PC += 2;
+	emu.cpu.regs.PC += 2;
 	
 	// Instruction uses 4 machine cycles.
 	cycles += 4;
@@ -1717,11 +2110,11 @@ void z80_LD_location_immediate_A()
 //----------------------------------------//
 void z80_LD_location_SP()
 {
-	WriteMemory((memory[regs.PC + 1] << 8) + memory[regs.PC], regs.SPL);
-	WriteMemory((memory[regs.PC + 1] << 8) + memory[regs.PC] + 1, regs.SPH);
+	//WriteMemory((emu.memory.romBank[emu.cpu.regs.PC + 1] << 8) + emu.memory.romBank[emu.cpu.regs.PC], emu.cpu.regs.SPL);
+	//WriteMemory((emu.memory.romBank[emu.cpu.regs.PC + 1] << 8) + emu.memory.romBank[emu.cpu.regs.PC] + 1, emu.cpu.regs.SPH);
 
 	// Skip over the 16-bit address.
-	regs.PC += 2;
+	emu.cpu.regs.PC += 2;
 
 	// Instruction uses 5 machine cycles.
 	cycles += 5;
@@ -1731,16 +2124,14 @@ void z80_LD_location_SP()
 // This instruction will load a 16-bit    //
 // register with a given value.           //
 //----------------------------------------//
-void z80_LD_reg16_immediate(unsigned char *reg1, unsigned char *reg2)
+void z80_LD_reg16_value(unsigned short int *reg)
 {
-	// Load the 16-bit value into address.
-	*reg2 = memory[regs.PC];
-	regs.PC++;
-	*reg1 = memory[regs.PC];
-	regs.PC++;
+	// Load the 16-bit value into the registers.
+	*reg = emu.memory.romBank[emu.cpu.regs.PC];
+	emu.cpu.regs.PC++;
 
 	// Instruction uses 3 machine cycles
-	cycles += 3;
+	cycles += 12;
 }
 
 //----------------------------------------//
@@ -1749,15 +2140,7 @@ void z80_LD_reg16_immediate(unsigned char *reg1, unsigned char *reg2)
 //----------------------------------------//
 void z80_LD_location_reg16_A(unsigned short int *reg)
 {
-	WriteMemory(*reg, regs.A);
-	
-	// If the opcode was HLI, increment HL.
-	if (opcode == 0x22)
-		regs.HL++;
-	// If the opcode was HLD, decrement HL.
-	else if (opcode == 0x32)
-		regs.HL--;
-
+	//WriteMemory(
 	// Instruction uses 2 machine cycles.
 	cycles += 2;
 }
@@ -1766,16 +2149,16 @@ void z80_LD_location_reg16_A(unsigned short int *reg)
 // This instruction will load an 8-bit    //
 // register with a given value.           //
 //----------------------------------------//
-void z80_LD_reg8_immediate(unsigned char *reg)
+void z80_LD_reg8_value(unsigned char *reg)
 {
 	// Load *reg with the 8-bit value immediately after it.
-	*reg = memory[regs.PC];
+	*reg = emu.memory.romBank[emu.cpu.regs.PC];
 	
 	// Increment the program counter to skip the value.
-	regs.PC++;
+	emu.cpu.regs.PC++;
 
-	// Instruction uses 2 machine cycles.
-	cycles += 2;
+	// Instruction uses 8 machine cycles.
+	cycles += 8;
 }
 
 //----------------------------------------//
@@ -1786,10 +2169,10 @@ void z80_LD_reg8_immediate(unsigned char *reg)
 void z80_LD_reg8_location_HL(unsigned char *reg)
 {
 	// Load the value at the address in HL into *reg.
-	*reg = memory[regs.HL];
+	*reg = emu.memory.romBank[emu.cpu.regs.HL];
 
-	// Instruction uses 2 machine cycles.
-	cycles += 2;
+	// Instruction uses 8 machine cycles.
+	cycles += 8;
 }
  
 //----------------------------------------//
@@ -1802,8 +2185,8 @@ void z80_LD_reg8_reg8(unsigned char *reg1, unsigned char *reg2)
 	// Load the value in *reg2 into *reg1.
 	*reg1 = *reg2;
 
-	// Instruction uses 1 clock cycle.
-	cycles += 1;
+	// Instruction uses 4 clock cycle.
+	cycles += 4;
 }
 
 //----------------------------------------//
@@ -1813,7 +2196,7 @@ void z80_LD_reg8_reg8(unsigned char *reg1, unsigned char *reg2)
 void z80_LD_SP_HL()
 {
 	// Load register HL into Stack Pointer.
-	regs.SP = regs.HL;
+	emu.cpu.regs.SP = emu.cpu.regs.HL;
 
 	// Instruction uses 2 machine cycles.
 	cycles += 2;
@@ -1825,7 +2208,7 @@ void z80_LD_SP_HL()
 //----------------------------------------//
 void z80_LD_0xFF00_C_A()
 {
-	WriteMemory(0xFF00 + regs.C, regs.A);
+	WriteMemory(0xFF00 + emu.cpu.regs.C, emu.cpu.regs.A);
 
 	cycles += 2;
 }
@@ -1838,10 +2221,10 @@ void z80_LD_0xFF00_C_A()
 void z80_LD_0xFF00_immediate_A()
 {
 	// Write the value of register A into memory.
-	WriteMemory(0xFF00 + memory[regs.PC], regs.A);
+	WriteMemory(0xFF00 + emu.memory.romBank[emu.cpu.regs.PC], emu.cpu.regs.A);
 
 	// Increment Program Counter
-	regs.PC++;
+	emu.cpu.regs.PC++;
 
 	// Instruction uses 3 machine cycles.
 	cycles += 3;
@@ -1854,7 +2237,7 @@ void z80_LD_0xFF00_immediate_A()
 void z80_NOP()
 {
 	// Idle for 1 machine cycle
-	cycles += 1;
+	cycles += 4;
 }
 
 //----------------------------------------//
@@ -1863,17 +2246,17 @@ void z80_NOP()
 //----------------------------------------//
 void z80_OR_immediate()
 {
-	regs.A |= memory[regs.PC];
+	emu.cpu.regs.A |= emu.memory.romBank[emu.cpu.regs.PC];
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.A];
 
 	// The other three flags are reset.
-	regs.F &= FLAG_Z_ON;
+	emu.cpu.regs.F &= FLAG_Z_ON;
 
 	// Increment Program Counter.
-	regs.PC++;
+	emu.cpu.regs.PC++;
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0xB6)
@@ -1889,14 +2272,14 @@ void z80_OR_immediate()
 void z80_OR_reg8(unsigned char *reg)
 {
 	// Logically Inclusive OR register A and *reg.
-	regs.A |= *reg;
+	emu.cpu.regs.A |= *reg;
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.A];
 
 	// The other three flags are reset.
-	regs.F &= FLAG_Z_ON;
+	emu.cpu.regs.F &= FLAG_Z_ON;
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0xB6)
@@ -1912,10 +2295,10 @@ void z80_OR_reg8(unsigned char *reg)
 void z80_POP_reg16(unsigned char *reg1, unsigned char *reg2)
 {
 	// Pop two bytes from the stack into *reg.
-	*reg2 = memory[regs.SP];
-	regs.SP++;
-	*reg1 = memory[regs.SP];
-	regs.SP++;
+	*reg2 = emu.memory.romBank[emu.cpu.regs.SP];
+	emu.cpu.regs.SP++;
+	*reg1 = emu.memory.romBank[emu.cpu.regs.SP];
+	emu.cpu.regs.SP++;
 
 	// Instruction uses 3 cycles.
 	cycles += 3;
@@ -1929,10 +2312,10 @@ void z80_PUSH_reg16(unsigned char *reg1, unsigned char *reg2)
 {
 	// Push the 16-bit register's two bytes onto the stack. Little
 	// Endian order.
-	regs.SP--;
-	WriteMemory(regs.SP, *reg1);
-	regs.SP--;
-	WriteMemory(regs.SP, *reg2);
+	emu.cpu.regs.SP--;
+	WriteMemory(emu.cpu.regs.SP, *reg1);
+	emu.cpu.regs.SP--;
+	WriteMemory(emu.cpu.regs.SP, *reg2);
 	
 	// Instruction uses 4 cycles.
 	cycles += 4;
@@ -1959,10 +2342,11 @@ void z80_RES_bit_reg8(unsigned char bit, unsigned char *reg)
 void z80_RET()
 {
 	// Set Program Counter to the first 16-bit address in the stack.
-	regs.PCL = memory[regs.SP];
-	regs.SP++;
-	regs.PCH = memory[regs.SP];
-	regs.SP++;
+	emu.cpu.regs.PC = emu.memory.romBank[emu.cpu.regs.SP];
+	emu.cpu.regs.PC = emu.cpu.regs.PC << 8;  // Shift the first number from memory into the higher 8-bits
+	emu.cpu.regs.SP++;
+	emu.cpu.regs.PC |= emu.memory.romBank[emu.cpu.regs.SP];  // Combine the next 8-bits with the first ones
+	emu.cpu.regs.SP++;
 
 	cycles += 4;
 }
@@ -1974,11 +2358,12 @@ void z80_RET()
 //----------------------------------------//
 void z80_RETI()
 {
-	// Load 16-bit address from stack into Program Counter.
-	regs.PCL = memory[regs.SP];
-	regs.SP++;
-	regs.PCH = memory[regs.SP];
-	regs.SP++;
+	// Set Program Counter to the first 16-bit address in the stack.
+	emu.cpu.regs.PC = emu.memory.romBank[emu.cpu.regs.SP];
+	emu.cpu.regs.PC = emu.cpu.regs.PC << 8;  // Shift the first number from memory into the higher 8-bits
+	emu.cpu.regs.SP++;
+	emu.cpu.regs.PC |= emu.memory.romBank[emu.cpu.regs.SP];  // Combine the next 8-bits with the first ones
+	emu.cpu.regs.SP++;
 
 	// Enable interrupts.
 	interruptMasterEnable = 1;
@@ -2034,10 +2419,11 @@ void z80_RET_condition(unsigned char condition)
 	if (conditionTrue == 1)
 	{
 		// Change the program counter to the address on the stack.
-		regs.PCL = memory[regs.SP];
-		regs.SP++;
-		regs.PCH = memory[regs.SP];
-		regs.SP++;
+		emu.cpu.regs.PC = emu.memory.romBank[emu.cpu.regs.SP];
+		emu.cpu.regs.PC = emu.cpu.regs.PC << 8;  // Shift the first number from memory into the higher 8-bits
+		emu.cpu.regs.SP++;
+		emu.cpu.regs.PC |= emu.memory.romBank[emu.cpu.regs.SP];  // Combine the next 8-bits with the first ones
+		emu.cpu.regs.SP++;
 
 		cycles += 3;
 	}
@@ -2059,7 +2445,7 @@ void z80_RL_reg8(unsigned char *reg)
 		else
 			*reg <<= 1;
 		
-		regs.F |= FLAG_C_ON;
+		emu.cpu.regs.F |= FLAG_C_ON;
 	}
 	else
 	{
@@ -2068,15 +2454,15 @@ void z80_RL_reg8(unsigned char *reg)
 		else
 			*reg <<= 1;
 		
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 	}
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[*reg];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[*reg];
 
 	// Flags H and N are all reset
-	regs.F &= (FLAG_Z_ON | FLAG_C_ON);
+	emu.cpu.regs.F &= (FLAG_Z_ON | FLAG_C_ON);
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0x16)
@@ -2091,28 +2477,28 @@ void z80_RL_reg8(unsigned char *reg)
 //----------------------------------------//
 void z80_RLA()
 {
-	if (regs.A & BIT_7)
+	if (emu.cpu.regs.A & BIT_7)
 	{
 		if (FLAG_C)
-			regs.A = (regs.A << 1) | 0x01;
+			emu.cpu.regs.A = (emu.cpu.regs.A << 1) | 0x01;
 		else
-			regs.A <<= 1;
+			emu.cpu.regs.A <<= 1;
 
-		regs.F |= FLAG_C_ON;
+		emu.cpu.regs.F |= FLAG_C_ON;
 	}
 	else
 	{
 		if (FLAG_C)
-			regs.A = (regs.A << 1) | 0x01;
+			emu.cpu.regs.A = (emu.cpu.regs.A << 1) | 0x01;
 		else
-			regs.A <<= 1;
+			emu.cpu.regs.A <<= 1;
 
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 	}
 
 	// The other three flags are reset.  Only the carry flag
 	// remains unchanged.
-	regs.F &= FLAG_C_ON;
+	emu.cpu.regs.F &= FLAG_C_ON;
 
 	// Instruction uses 1 machine cycle.
 	cycles += 1;
@@ -2126,9 +2512,9 @@ void z80_RLC_reg8(unsigned char *reg)
 {
 	// See if the old bit 7 data is on or off and set flag C accordingly.
 	if (*reg & BIT_7)
-		regs.F |= FLAG_C_ON;
+		emu.cpu.regs.F |= FLAG_C_ON;
 	else
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 
 	// Shift *reg 1 bit to the left.  Old bit 7 goes to bit 0.
 	*reg <<= 1;
@@ -2138,11 +2524,11 @@ void z80_RLC_reg8(unsigned char *reg)
 		*reg |= 1;
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[*reg];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[*reg];
 	
 	// Flags N and H are reset.
-	regs.F &= (FLAG_Z_ON | FLAG_C_ON);
+	emu.cpu.regs.F &= (FLAG_Z_ON | FLAG_C_ON);
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0x06)
@@ -2157,21 +2543,21 @@ void z80_RLC_reg8(unsigned char *reg)
 //----------------------------------------//
 void z80_RLCA()
 {
-	if (regs.A & BIT_7)
-		regs.F |= FLAG_C_ON;
+	if (emu.cpu.regs.A & BIT_7)
+		emu.cpu.regs.F |= FLAG_C_ON;
 	else
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 
 	// Shift register A 1 bit to the left.  Old bit 7 goes to bit 0.
-	regs.A <<= 1;
+	emu.cpu.regs.A <<= 1;
 	
 	// Add flag C to register A to make up for the shifted out bit.
 	if (FLAG_C)
-		regs.A |= 0x01;
+		emu.cpu.regs.A |= 0x01;
 
 	// The other three flags are reset.  Only the carry flag
 	// remains unchanged.
-	regs.F &= FLAG_C_ON;
+	emu.cpu.regs.F &= FLAG_C_ON;
 
 	// Instruction uses 1 machine cycle.
 	cycles += 1;
@@ -2190,7 +2576,7 @@ void z80_RR_reg8(unsigned char *reg)
 		else
 			*reg >>= 1;
 		
-		regs.F |= FLAG_C_ON;
+		emu.cpu.regs.F |= FLAG_C_ON;
 	}
 	else
 	{
@@ -2199,15 +2585,15 @@ void z80_RR_reg8(unsigned char *reg)
 		else
 			*reg >>= 1;
 		
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 	}
 	
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[*reg];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[*reg];
 
 	// Flags N and H are reset.
-	regs.F &= (FLAG_Z_ON | FLAG_C_ON);
+	emu.cpu.regs.F &= (FLAG_Z_ON | FLAG_C_ON);
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0x1E)
@@ -2222,27 +2608,27 @@ void z80_RR_reg8(unsigned char *reg)
 //----------------------------------------//
 void z80_RRA()
 {
-	if (regs.A & BIT_0)
+	if (emu.cpu.regs.A & BIT_0)
 	{
 		if (FLAG_C)
-			regs.A = (regs.A >> 1) | 0x80;
+			emu.cpu.regs.A = (emu.cpu.regs.A >> 1) | 0x80;
 		else
-			regs.A >>= 1;
+			emu.cpu.regs.A >>= 1;
 
-		regs.F |= FLAG_C_ON;
+		emu.cpu.regs.F |= FLAG_C_ON;
 	}
 	else
 	{
 		if (FLAG_C)
-			regs.A = (regs.A >> 1) | 0x80;
+			emu.cpu.regs.A = (emu.cpu.regs.A >> 1) | 0x80;
 		else
-			regs.A >>= 1;
+			emu.cpu.regs.A >>= 1;
 
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 	}
 
 	// The other three flags are reset.
-	regs.F &= FLAG_C_ON;
+	emu.cpu.regs.F &= FLAG_C_ON;
 
 	// Instruction uses 1 machine cycle.
 	cycles += 1;
@@ -2256,9 +2642,9 @@ void z80_RRC_reg8(unsigned char *reg)
 {
 	// See if the old bit 0 data was on or off and set flag C accordingly.
 	if (*reg & BIT_0)
-		regs.F |= FLAG_C_ON;
+		emu.cpu.regs.F |= FLAG_C_ON;
 	else
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 
 	// Shift *reg 1 bit to the right.  Old bit 0 goes to bit 7.
 	*reg >>= 1;
@@ -2269,11 +2655,11 @@ void z80_RRC_reg8(unsigned char *reg)
 		*reg |= 0x80;
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[*reg];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[*reg];
 
 	// Flags N and H are reset.
-	regs.F &= (FLAG_Z_ON | FLAG_C_ON);
+	emu.cpu.regs.F &= (FLAG_Z_ON | FLAG_C_ON);
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0x0E)
@@ -2289,21 +2675,21 @@ void z80_RRC_reg8(unsigned char *reg)
 void z80_RRCA()
 {
 	// See if the old bit 0 data was on or off and set flag C accordingly.
-	if (regs.A & BIT_0)
-		regs.F |= FLAG_C_ON;
+	if (emu.cpu.regs.A & BIT_0)
+		emu.cpu.regs.F |= FLAG_C_ON;
 	else
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 
 	// Shift register A 1 bit to the right.  Old bit 0 goes to bit 7.
-	regs.A >>= 1;
+	emu.cpu.regs.A >>= 1;
 
 	// If flag C is on, add 0x80 to register A to make up for the
 	// lost bit.
 	if (FLAG_C)
-		regs.A |= 0x80;
+		emu.cpu.regs.A |= 0x80;
 
 	// The other three flags are reset.
-	regs.F &= FLAG_C_ON;
+	emu.cpu.regs.F &= FLAG_C_ON;
 
 	// Instruction uses 1 machine cycle.
 	cycles += 1;
@@ -2319,13 +2705,13 @@ void z80_RST(unsigned char address)
 {
 	// Push the Program Counter into the stack in little-endian
 	// (low byte first) order.
-	regs.SP--;
-	WriteMemory(regs.SP, regs.PCH);
-	regs.SP--;
-	WriteMemory(regs.SP, regs.PCL);
+	emu.cpu.regs.SP--;
+	WriteMemory(emu.cpu.regs.SP, emu.cpu.regs.PC & 0xFF00);
+	emu.cpu.regs.SP--;
+	WriteMemory(emu.cpu.regs.SP, emu.cpu.regs.PC & 0x00FF);
 
 	// Set Program Counter to address.
-	regs.PC = address;
+	emu.cpu.regs.PC = address;
 
 	// Instruction uses 4 machine cycles.
 	cycles += 4;
@@ -2338,32 +2724,32 @@ void z80_RST(unsigned char address)
 void z80_SBC_A_immediate()
 {
 	// Need to check for borrow from bit 4.
-	if (((regs.A - memory[regs.PC] - FLAG_C) & 0xF) == 0xF)
-		regs.F |= FLAG_H_ON;
+	if (((emu.cpu.regs.A - emu.memory.romBank[emu.cpu.regs.PC] - FLAG_C) & 0xF) == 0xF)
+		emu.cpu.regs.F |= FLAG_H_ON;
 	else
-		regs.F &= FLAG_H_OFF;
+		emu.cpu.regs.F &= FLAG_H_OFF;
 
 	// Set flag C if result will be below 0.
-	if ((regs.A - memory[regs.PC] - FLAG_C) < 0)
+	if ((emu.cpu.regs.A - emu.memory.romBank[emu.cpu.regs.PC] - FLAG_C) < 0)
 	{
-		regs.A -= memory[regs.PC] + FLAG_C;
-		regs.F |= FLAG_C_ON;
+		emu.cpu.regs.A -= emu.memory.romBank[emu.cpu.regs.PC] + FLAG_C;
+		emu.cpu.regs.F |= FLAG_C_ON;
 	}
 	else
 	{
-		regs.A -= memory[regs.PC] + FLAG_C;
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.A -= emu.memory.romBank[emu.cpu.regs.PC] + FLAG_C;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 	}
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.A];
 
 	// Increment Program Counter.
-	regs.PC++;
+	emu.cpu.regs.PC++;
 
 	// Flag N is set.
-	regs.F |= FLAG_N_ON;
+	emu.cpu.regs.F |= FLAG_N_ON;
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0x9E)
@@ -2380,29 +2766,29 @@ void z80_SBC_A_immediate()
 void z80_SBC_A_reg8(unsigned char *reg)
 {
 	// Need to check for borrow from bit 4.
-	if (((regs.A - *reg - FLAG_C) & 0xF) == 0xF)
-		regs.F |= FLAG_H_ON;
+	if (((emu.cpu.regs.A - *reg - FLAG_C) & 0xF) == 0xF)
+		emu.cpu.regs.F |= FLAG_H_ON;
 	else
-		regs.F &= FLAG_H_OFF;
+		emu.cpu.regs.F &= FLAG_H_OFF;
 
 	// Set flag C if result will be below 0.
-	if ((regs.A - *reg - FLAG_C) < 0)
+	if ((emu.cpu.regs.A - *reg - FLAG_C) < 0)
 	{
-		regs.A -= *reg + FLAG_C;
-		regs.F |= FLAG_C_ON;
+		emu.cpu.regs.A -= *reg + FLAG_C;
+		emu.cpu.regs.F |= FLAG_C_ON;
 	}
 	else
 	{
-		regs.A -= *reg + FLAG_C;
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.A -= *reg + FLAG_C;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 	}
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.A];
 
 	// Flag N is set.
-	regs.F |= FLAG_N_ON;
+	emu.cpu.regs.F |= FLAG_N_ON;
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0x9E)
@@ -2418,10 +2804,10 @@ void z80_SBC_A_reg8(unsigned char *reg)
 void z80_SCF()
 {
 	// Set flag C.
-	regs.F |= FLAG_C_ON;
+	emu.cpu.regs.F |= FLAG_C_ON;
 
 	// Flags N and H are reset.
-	regs.F &= (FLAG_Z_ON | FLAG_C_ON);
+	emu.cpu.regs.F &= (FLAG_Z_ON | FLAG_C_ON);
 
 	// Instruction uses 1 machine cycle.
 	cycles += 1;
@@ -2450,9 +2836,9 @@ void z80_SLA_reg8(unsigned char *reg)
 {
 	// Put *reg's old bit 7 data in Carry flag.
 	if (*reg & BIT_7)
-		regs.F |= FLAG_C_ON;
+		emu.cpu.regs.F |= FLAG_C_ON;
 	else
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 
 	// Shift *reg left once.  0 is shifted in from right.
 	*reg <<= 1;
@@ -2461,11 +2847,11 @@ void z80_SLA_reg8(unsigned char *reg)
 	*reg &= (255 - BIT_0);
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[*reg];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[*reg];
 
 	// Flags H and N are reset.
-	regs.F &= (FLAG_Z_ON | FLAG_C_ON);
+	emu.cpu.regs.F &= (FLAG_Z_ON | FLAG_C_ON);
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0x26)
@@ -2483,9 +2869,9 @@ void z80_SRA_reg8(unsigned char *reg)
 {
 	// Put *reg's old bit 0 data in Carry flag.
 	if (*reg & BIT_0)
-		regs.F |= FLAG_C_ON;
+		emu.cpu.regs.F |= FLAG_C_ON;
 	else
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 
 	// Shift *reg right once.  0 is shifted in from left.  If bit 7
 	// is set, make sure it stays set.
@@ -2495,11 +2881,11 @@ void z80_SRA_reg8(unsigned char *reg)
 		*reg >>= 1;
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[*reg];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[*reg];
 
 	// Flags H and N are reset.
-	regs.F &= (FLAG_Z_ON | FLAG_C_ON);
+	emu.cpu.regs.F &= (FLAG_Z_ON | FLAG_C_ON);
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0x2E)
@@ -2517,19 +2903,19 @@ void z80_SRL_reg8(unsigned char *reg)
 {
 	// Put *reg's old bit 0 data in Carry flag.
 	if (*reg & BIT_0)
-		regs.F |= FLAG_C_ON;
+		emu.cpu.regs.F |= FLAG_C_ON;
 	else
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 
 	// Shift *reg right once.  0 is shifted in from right.
 	*reg >>= 1;
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[*reg];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[*reg];
 
 	// Flags H and N are reset.
-	regs.F &= (FLAG_Z_ON | FLAG_C_ON);
+	emu.cpu.regs.F &= (FLAG_Z_ON | FLAG_C_ON);
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0x3E)
@@ -2545,7 +2931,7 @@ void z80_SRL_reg8(unsigned char *reg)
 void z80_STOP()
 {
 	// Skip over the extra 0x00
-	regs.PC++;
+	emu.cpu.regs.PC++;
 
 	// Set stopped status to on.
     stopped = 1;
@@ -2561,29 +2947,29 @@ void z80_STOP()
 void z80_SUB_immediate()
 {
 	// Need to check for borrow from bit 4.
-	if (((regs.A - memory[regs.PC]) & 0xF) == 0xF)
-		regs.F |= FLAG_H_ON;
+	if (((emu.cpu.regs.A - emu.memory.romBank[emu.cpu.regs.PC]) & 0xF) == 0xF)
+		emu.cpu.regs.F |= FLAG_H_ON;
 	else
-		regs.F &= FLAG_H_OFF;
+		emu.cpu.regs.F &= FLAG_H_OFF;
 
 	// Set flag C if result will be below 0.
-	if ((regs.A - memory[regs.PC]) < 0)
-		regs.F |= FLAG_C_ON;
+	if ((emu.cpu.regs.A - emu.memory.romBank[emu.cpu.regs.PC]) < 0)
+		emu.cpu.regs.F |= FLAG_C_ON;
 	else
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 
 	// Subtract *reg from register A.
-	regs.A -= memory[regs.PC];
+	emu.cpu.regs.A -= emu.memory.romBank[emu.cpu.regs.PC];
 
 	// If the result was 0, turn on flag Z.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.A];
 	
 	// Increment Program Counter.
-	regs.PC++;
+	emu.cpu.regs.PC++;
 	
 	// Turn on flag N.
-	regs.F |= FLAG_N_ON;
+	emu.cpu.regs.F |= FLAG_N_ON;
 
 	// Instruction uses 2 machine cycles.
 	cycles += 2;
@@ -2596,26 +2982,26 @@ void z80_SUB_immediate()
 void z80_SUB_reg8(unsigned char *reg)
 {
 	// Need to check for borrow from bit 4.
-	if (((regs.A - *reg) & 0xF) == 0xF)
-		regs.F |= FLAG_H_ON;
+	if (((emu.cpu.regs.A - *reg) & 0xF) == 0xF)
+		emu.cpu.regs.F |= FLAG_H_ON;
 	else
-		regs.F &= FLAG_H_OFF;
+		emu.cpu.regs.F &= FLAG_H_OFF;
 
 	// Set flag C if result will be below 0.
-	if ((regs.A - *reg) < 0)
-		regs.F |= FLAG_C_ON;
+	if ((emu.cpu.regs.A - *reg) < 0)
+		emu.cpu.regs.F |= FLAG_C_ON;
 	else
-		regs.F &= FLAG_C_OFF;
+		emu.cpu.regs.F &= FLAG_C_OFF;
 	
 	// Subtract *reg from register A.
-	regs.A -= *reg;
+	emu.cpu.regs.A -= *reg;
 
 	// If the result was 0, turn on flag Z.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.A];
 	
 	// Turn on flag N.
-	regs.F |= FLAG_N_ON;
+	emu.cpu.regs.F |= FLAG_N_ON;
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0x96)
@@ -2634,11 +3020,11 @@ void z80_SWAP_reg8(unsigned char *reg)
 	*reg = (((*reg & 0xF0) >> 4) | ((*reg & 0x0F) << 4));
 
 	// If the result was 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[*reg];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[*reg];
 
 	// The other three flags are reset.
-	regs.F &= FLAG_Z_ON;
+	emu.cpu.regs.F &= FLAG_Z_ON;
 
 	// Machines cycles used is dependant on opcode.
 	if (opcode == 0x36)
@@ -2654,17 +3040,17 @@ void z80_SWAP_reg8(unsigned char *reg)
 void z80_XOR_immediate()
 {
 	// Logically Exclusive OR register A and *reg.
-	regs.A ^= memory[regs.PC];
+	emu.cpu.regs.A ^= emu.memory.romBank[emu.cpu.regs.PC];
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.A];
 
 	// Increment Program Counter.
-	regs.PC++;
+	emu.cpu.regs.PC++;
 	
 	// The other three flags are reset.
-	regs.F &= FLAG_Z_ON;
+	emu.cpu.regs.F &= FLAG_Z_ON;
 
 	// Instruction uses 2 machine cycles.
 	cycles += 2;
@@ -2677,14 +3063,14 @@ void z80_XOR_immediate()
 void z80_XOR_reg8(unsigned char *reg)
 {
 	// Logically Exclusive OR register A and *reg.
-	regs.A ^= *reg;
+	emu.cpu.regs.A ^= *reg;
 
 	// If result is 0, set flag Z, otherwise reset it.
-	regs.F &= 127;
-	regs.F |= zeroTable[regs.A];
+	emu.cpu.regs.F &= 127;
+	emu.cpu.regs.F |= zeroTable[emu.cpu.regs.A];
 
 	// The other three flags are reset.
-	regs.F &= FLAG_Z_ON;
+	emu.cpu.regs.F &= FLAG_Z_ON;
 
 	// Machine cycles used is dependant on opcode.
 	if (opcode == 0xAE)
@@ -2694,34 +3080,120 @@ void z80_XOR_reg8(unsigned char *reg)
 }
 
 //----------------------------------------//
+// This function will initialize the GB   //
+// to it's startup state.
+//----------------------------------------//
+int EmulationInitialize(unsigned char *fileBuffer, unsigned int fileSize)
+{
+	emu.cart.dataBuffer = (unsigned char *)malloc(fileSize);
+	if (!emu.cart.dataBuffer)
+		return -1;
+	memcpy(&emu.cart.dataBuffer[0], &fileBuffer[0], fileSize);  // Copy ROM file data to cartridge buffer 
+	if (emu.cart.dataBuffer[0x0143] == 0x80)
+		emu.cart.systemType = SYSTEM_CGB;
+	if (emu.cart.dataBuffer[0x0146] == 0x03)
+		emu.cart.systemType = SYSTEM_SGB;
+	if (emu.cart.dataBuffer[0x0146] == 0x00)
+		emu.cart.systemType = SYSTEM_GB;
+
+	if ((emu.cart.systemType != SYSTEM_GB) && (emu.cart.systemType != SYSTEM_SGB)) // Only original Gameboy supported for now.
+		return -1;
+
+	//----------------------------------------//
+	// Set the CPU and IO register startup    //
+	// values.                                //
+	//----------------------------------------//
+	if (emu.cart.systemType = SYSTEM_GB)
+	{
+		emu.io.regs.NR52 = 0xF1;
+		emu.cpu.regs.AF = 0x01B0;
+	}
+	else
+		emu.cpu.regs.AF = 0x00B0;
+	emu.cpu.regs.BC = 0x0013;
+	emu.cpu.regs.DE = 0x00D8;
+	emu.cpu.regs.HL = 0x014D;
+	emu.cpu.regs.SP = 0xFFFE;
+	emu.cpu.regs.PC = 0x0100;
+
+	emu.io.regs.P1 =	0xFF;
+	emu.io.regs.SB =	0x00;
+	emu.io.regs.SC =	0x00;
+	emu.io.regs.DIV =	0xAD;
+	emu.io.regs.TIMA =	0x00;
+	emu.io.regs.TMA =	0x00;
+	emu.io.regs.TAC =	0x00;
+	emu.io.regs.IF =	0xE1;
+	emu.io.regs.NR10 =	0x80;
+	emu.io.regs.NR11 =	0xBF;
+	emu.io.regs.NR12 =	0xF3;
+	emu.io.regs.NR14 =	0xBF;
+	emu.io.regs.NR21 =	0xF3;
+	emu.io.regs.NR12 =	0xF3;
+	emu.io.regs.NR22 =	0x00;
+	emu.io.regs.NR24 =	0xBF;
+	emu.io.regs.NR30 =	0x7F;
+	emu.io.regs.NR31 =	0xFF;
+	emu.io.regs.NR32 =	0x9F;
+	emu.io.regs.NR33 =	0xBF;
+	emu.io.regs.NR41 =	0xFF;
+	emu.io.regs.NR42 =	0x00;
+	emu.io.regs.NR43 =	0x00;
+	emu.io.regs.NR44 =	0xBF;
+	emu.io.regs.NR50 =	0x77;
+	emu.io.regs.NR51 =	0xF3;
+	emu.io.regs.LCDC =	0x91;
+	emu.io.regs.STAT =	0x80;
+	emu.io.regs.SCY =	0x00;
+	emu.io.regs.SCX =	0x00;
+	emu.io.regs.LYC =	0x00;
+	emu.io.regs.DMA =	0x00;
+	emu.io.regs.BGP =	0xFC;
+	emu.io.regs.OBP1 =	0xFF;
+	emu.io.regs.OBP2 =	0xFF;
+	emu.io.regs.WY =	0x00;
+	emu.io.regs.WX =	0x00;
+	emu.io.regs.IE =	0x00;
+
+	// Assume standard Gameboy opcode cycles for now
+	memcpy(&emu.cpu.gbOpcode.cycles[0], &GB_CycleTable[0], 0x100);
+	memcpy(&emu.cpu.gbOpcode.bitCycles[0], &GB_BitCycleTable[0], 0x100);
+
+	//----------------------------------------//
+	// Load the base ROM (32K).               //
+	//----------------------------------------//
+	memcpy(&emu.memory.romBank[0x0000], &emu.cart.dataBuffer[0x0000], 0x8000);
+
+	return 1;
+}
+
+//----------------------------------------//
 // This function takes care of the main GB//
 // CPU processes.                         //
 //----------------------------------------//
 void RunEmulation()
 {
-	// Initialize audio library
-	//aud.Initialize();
-
+	int currentOpcode = 0;
+	CPURunning = 1;
 	// Setup a function callback to display Frames Per Second.
-	FPSTimerID = SDL_AddTimer(1000, UpdateFPS, NULL);
-
-	emulationTimer = SDL_GetTicks();
+	//FPSTimerID = SDL_AddTimer(1000, UpdateFPS, NULL);
+	//emulationTimer = SDL_GetTicks();
 
 	while (CPURunning)
 	{
-	while (cycleTotal < cyclesToRun)
-	{
-		if (halted == 0)
-		{
-			if (stopped == 0)
-			{
+	//while (cycleTotal < GB_CyclesPerFrame)
+	//{
+		//if (halted == 0)
+		//{
+		//	if (stopped == 0)
+		//	{
 				// Fetch an opcode from the ROM buffer.
-				opcode = memory[regs.PC];
+				currentOpcode = emu.memory.romBank[emu.cpu.regs.PC];
 
 				// Increment the Program Counter.
 				if (instructionRepeat == 0)
 				{
-					regs.PC++;
+					emu.cpu.regs.PC++;
 				}
 				else
 				{
@@ -2732,203 +3204,203 @@ void RunEmulation()
 				switch(opcode)
 				{
 				case 0x00: z80_NOP(); break;
-				case 0x01: z80_LD_reg16_immediate(&regs.B, &regs.C); break;
-				case 0x02: z80_LD_location_reg16_A(&regs.BC); break;
-				case 0x03: z80_INC_reg16(&regs.BC); break;
-				case 0x04: z80_INC_reg8(&regs.B); break;
-				case 0x05: z80_DEC_reg8(&regs.B); break;
-				case 0x06: z80_LD_reg8_immediate(&regs.B); break;
+				case 0x01: z80_LD_reg16_value(&emu.cpu.regs.BC); break;
+				case 0x02: z80_LD_location_reg16_A(&emu.cpu.regs.BC); break;
+				case 0x03: z80_INC_reg16(&emu.cpu.regs.B, &emu.cpu.regs.C); break;
+				case 0x04: z80_INC_reg8(&emu.cpu.regs.B); break;
+				case 0x05: z80_DEC_reg8(&emu.cpu.regs.B); break;
+				case 0x06: z80_LD_reg8_value(&emu.cpu.regs.B); break;
 				case 0x07: z80_RLCA(); break;
 				case 0x08: z80_LD_location_SP(); break;
-				case 0x09: z80_ADD_HL_reg16(&regs.BC); break;
-				case 0x0A: z80_LD_A_location_reg16(&regs.BC); break;
-				case 0x0B: z80_DEC_reg16(&regs.BC); break;
-				case 0x0C: z80_INC_reg8(&regs.C); break;
-				case 0x0D: z80_DEC_reg8(&regs.C); break;
-				case 0x0E: z80_LD_reg8_immediate(&regs.C); break;
+				case 0x09: z80_ADD_HL_reg16(&emu.cpu.regs.BC); break;
+				case 0x0A: z80_LD_A_location_reg16(&emu.cpu.regs.BC); break;
+				case 0x0B: z80_DEC_reg16(&emu.cpu.regs.BC); break;
+				case 0x0C: z80_INC_reg8(&emu.cpu.regs.C); break;
+				case 0x0D: z80_DEC_reg8(&emu.cpu.regs.C); break;
+				case 0x0E: z80_LD_reg8_value(&emu.cpu.regs.C); break;
 				case 0x0F: z80_RRCA(); break;
 				case 0x10: z80_STOP(); break;
-				case 0x11: z80_LD_reg16_immediate(&regs.D, &regs.E); break;
-				case 0x12: z80_LD_location_reg16_A(&regs.DE); break;
-				case 0x13: z80_INC_reg16(&regs.DE); break;
-				case 0x14: z80_INC_reg8(&regs.D); break;
-				case 0x15: z80_DEC_reg8(&regs.D); break;
-				case 0x16: z80_LD_reg8_immediate(&regs.D); break;
+				case 0x11: z80_LD_reg16_value(&emu.cpu.regs.D, &emu.cpu.regs.E); break;
+				case 0x12: z80_LD_location_reg16_A(&emu.cpu.regs.DE); break;
+				case 0x13: z80_INC_reg16(&emu.cpu.regs.DE); break;
+				case 0x14: z80_INC_reg8(&emu.cpu.regs.D); break;
+				case 0x15: z80_DEC_reg8(&emu.cpu.regs.D); break;
+				case 0x16: z80_LD_reg8_value(&emu.cpu.regs.D); break;
 				case 0x17: z80_RLA(); break;
 				case 0x18: z80_JR_offset(); break;
-				case 0x19: z80_ADD_HL_reg16(&regs.DE); break;
-				case 0x1A: z80_LD_A_location_reg16(&regs.DE); break;
-				case 0x1B: z80_DEC_reg16(&regs.DE); break;
-				case 0x1C: z80_INC_reg8(&regs.E); break;
-				case 0x1D: z80_DEC_reg8(&regs.E); break;
-				case 0x1E: z80_LD_reg8_immediate(&regs.E); break;
+				case 0x19: z80_ADD_HL_reg16(&emu.cpu.regs.DE); break;
+				case 0x1A: z80_LD_A_location_reg16(&emu.cpu.regs.DE); break;
+				case 0x1B: z80_DEC_reg16(&emu.cpu.regs.DE); break;
+				case 0x1C: z80_INC_reg8(&emu.cpu.regs.E); break;
+				case 0x1D: z80_DEC_reg8(&emu.cpu.regs.E); break;
+				case 0x1E: z80_LD_reg8_value(&emu.cpu.regs.E); break;
 				case 0x1F: z80_RRA(); break;
 				case 0x20: z80_JR_condition_offset(0x01); break;
-				case 0x21: z80_LD_reg16_immediate(&regs.H, &regs.L); break;
-				case 0x22: z80_LD_location_reg16_A(&regs.HL); break;
-				case 0x23: z80_INC_reg16(&regs.HL); break;
-				case 0x24: z80_INC_reg8(&regs.H); break;
-				case 0x25: z80_DEC_reg8(&regs.H); break;
-				case 0x26: z80_LD_reg8_immediate(&regs.H); break;
+				case 0x21: z80_LD_reg16_value(&emu.cpu.regs.H, &emu.cpu.regs.L); break;
+				case 0x22: z80_LD_location_reg16_A(&emu.cpu.regs.HL); break;
+				case 0x23: z80_INC_reg16(&emu.cpu.regs.HL); break;
+				case 0x24: z80_INC_reg8(&emu.cpu.regs.H); break;
+				case 0x25: z80_DEC_reg8(&emu.cpu.regs.H); break;
+				case 0x26: z80_LD_reg8_value(&emu.cpu.regs.H); break;
 				case 0x27: z80_DAA(); break;
 				case 0x28: z80_JR_condition_offset(0x02); break;
-				case 0x29: z80_ADD_HL_reg16(&regs.HL); break;
-				case 0x2A: z80_LD_A_location_reg16(&regs.HL); break;
-				case 0x2B: z80_DEC_reg16(&regs.HL); break;
-				case 0x2C: z80_INC_reg8(&regs.L); break;
-				case 0x2D: z80_DEC_reg8(&regs.L); break;
-				case 0x2E: z80_LD_reg8_immediate(&regs.L); break;
+				case 0x29: z80_ADD_HL_reg16(&emu.cpu.regs.HL); break;
+				case 0x2A: z80_LD_A_location_reg16(&emu.cpu.regs.HL); break;
+				case 0x2B: z80_DEC_reg16(&emu.cpu.regs.HL); break;
+				case 0x2C: z80_INC_reg8(&emu.cpu.regs.L); break;
+				case 0x2D: z80_DEC_reg8(&emu.cpu.regs.L); break;
+				case 0x2E: z80_LD_reg8_value(&emu.cpu.regs.L); break;
 				case 0x2F: z80_CPL(); break;
 				case 0x30: z80_JR_condition_offset(0x03); break;
-				case 0x31: z80_LD_reg16_immediate(&regs.SPH, &regs.SPL); break;
-				case 0x32: z80_LD_location_reg16_A(&regs.HL); break;
-				case 0x33: z80_INC_reg16(&regs.SP); break;
+				case 0x31: z80_LD_reg16_value(&emu.cpu.regs.SPH, &emu.cpu.regs.SPL); break;
+				case 0x32: z80_LD_location_reg16_A(&emu.cpu.regs.HL); break;
+				case 0x33: z80_INC_reg16(&emu.cpu.regs.SP); break;
 				case 0x34: z80_INC_location_HL(); break;
 				case 0x35: z80_DEC_location_HL(); break;
 				case 0x36: z80_LD_location_HL_immediate(); break;
 				case 0x37: z80_SCF(); break;
 				case 0x38: z80_JR_condition_offset(0x04); break;
-				case 0x39: z80_ADD_HL_reg16(&regs.SP); break;
-				case 0x3A: z80_LD_A_location_reg16(&regs.HL); break;
-				case 0x3B: z80_DEC_reg16(&regs.SP); break;
-				case 0x3C: z80_INC_reg8(&regs.A); break;
-				case 0x3D: z80_DEC_reg8(&regs.A); break;
-				case 0x3E: z80_LD_reg8_immediate(&regs.A); break;
+				case 0x39: z80_ADD_HL_reg16(&emu.cpu.regs.SP); break;
+				case 0x3A: z80_LD_A_location_reg16(&emu.cpu.regs.HL); break;
+				case 0x3B: z80_DEC_reg16(&emu.cpu.regs.SP); break;
+				case 0x3C: z80_INC_reg8(&emu.cpu.regs.A); break;
+				case 0x3D: z80_DEC_reg8(&emu.cpu.regs.A); break;
+				case 0x3E: z80_LD_reg8_value(&emu.cpu.regs.A); break;
 				case 0x3F: z80_CCF(); break;
-				case 0x40: z80_LD_reg8_reg8(&regs.B, &regs.B); break;
-				case 0x41: z80_LD_reg8_reg8(&regs.B, &regs.C); break;
-				case 0x42: z80_LD_reg8_reg8(&regs.B, &regs.D); break;
-				case 0x43: z80_LD_reg8_reg8(&regs.B, &regs.E); break;
-				case 0x44: z80_LD_reg8_reg8(&regs.B, &regs.H); break;
-				case 0x45: z80_LD_reg8_reg8(&regs.B, &regs.L); break;
-				case 0x46: z80_LD_reg8_location_HL(&regs.B); break;
-				case 0x47: z80_LD_reg8_reg8(&regs.B, &regs.A); break;
-				case 0x48: z80_LD_reg8_reg8(&regs.C, &regs.B); break;
-				case 0x49: z80_LD_reg8_reg8(&regs.C, &regs.C); break;
-				case 0x4A: z80_LD_reg8_reg8(&regs.C, &regs.D); break;
-				case 0x4B: z80_LD_reg8_reg8(&regs.C, &regs.E); break;
-				case 0x4C: z80_LD_reg8_reg8(&regs.C, &regs.H); break;
-				case 0x4D: z80_LD_reg8_reg8(&regs.C, &regs.L); break;
-				case 0x4E: z80_LD_reg8_location_HL(&regs.C); break;
-				case 0x4F: z80_LD_reg8_reg8(&regs.C, &regs.A); break;
-				case 0x50: z80_LD_reg8_reg8(&regs.D, &regs.B); break;
-				case 0x51: z80_LD_reg8_reg8(&regs.D, &regs.C); break;
-				case 0x52: z80_LD_reg8_reg8(&regs.D, &regs.D); break;
-				case 0x53: z80_LD_reg8_reg8(&regs.D, &regs.E); break;
-				case 0x54: z80_LD_reg8_reg8(&regs.D, &regs.H); break;
-				case 0x55: z80_LD_reg8_reg8(&regs.D, &regs.L); break;
-				case 0x56: z80_LD_reg8_location_HL(&regs.D); break;
-				case 0x57: z80_LD_reg8_reg8(&regs.D, &regs.A); break;
-				case 0x58: z80_LD_reg8_reg8(&regs.E, &regs.B); break;
-				case 0x59: z80_LD_reg8_reg8(&regs.E, &regs.C); break;
-				case 0x5A: z80_LD_reg8_reg8(&regs.E, &regs.D); break;
-				case 0x5B: z80_LD_reg8_reg8(&regs.E, &regs.E); break;
-				case 0x5C: z80_LD_reg8_reg8(&regs.E, &regs.H); break;
-				case 0x5D: z80_LD_reg8_reg8(&regs.E, &regs.L); break;
-				case 0x5E: z80_LD_reg8_location_HL(&regs.E); break;
-				case 0x5F: z80_LD_reg8_reg8(&regs.E, &regs.A); break;
-				case 0x60: z80_LD_reg8_reg8(&regs.H, &regs.B); break;
-				case 0x61: z80_LD_reg8_reg8(&regs.H, &regs.C); break;
-				case 0x62: z80_LD_reg8_reg8(&regs.H, &regs.D); break;
-				case 0x63: z80_LD_reg8_reg8(&regs.H, &regs.E); break;
-				case 0x64: z80_LD_reg8_reg8(&regs.H, &regs.H); break;
-				case 0x65: z80_LD_reg8_reg8(&regs.H, &regs.L); break;
-				case 0x66: z80_LD_reg8_location_HL(&regs.H); break;
-				case 0x67: z80_LD_reg8_reg8(&regs.H, &regs.A); break;
-				case 0x68: z80_LD_reg8_reg8(&regs.L, &regs.B); break;
-				case 0x69: z80_LD_reg8_reg8(&regs.L, &regs.C); break;
-				case 0x6A: z80_LD_reg8_reg8(&regs.L, &regs.D); break;
-				case 0x6B: z80_LD_reg8_reg8(&regs.L, &regs.E); break;
-				case 0x6C: z80_LD_reg8_reg8(&regs.L, &regs.H); break;
-				case 0x6D: z80_LD_reg8_reg8(&regs.L, &regs.L); break;
-				case 0x6E: z80_LD_reg8_location_HL(&regs.L); break;
-				case 0x6F: z80_LD_reg8_reg8(&regs.L, &regs.A); break;
-				case 0x70: z80_LD_location_HL_reg8(&regs.B); break;
-				case 0x71: z80_LD_location_HL_reg8(&regs.C); break;
-				case 0x72: z80_LD_location_HL_reg8(&regs.D); break;
-				case 0x73: z80_LD_location_HL_reg8(&regs.E); break;
-				case 0x74: z80_LD_location_HL_reg8(&regs.H); break;
-				case 0x75: z80_LD_location_HL_reg8(&regs.L); break;
+				case 0x40: z80_LD_reg8_reg8(&emu.cpu.regs.B, &emu.cpu.regs.B); break;
+				case 0x41: z80_LD_reg8_reg8(&emu.cpu.regs.B, &emu.cpu.regs.C); break;
+				case 0x42: z80_LD_reg8_reg8(&emu.cpu.regs.B, &emu.cpu.regs.D); break;
+				case 0x43: z80_LD_reg8_reg8(&emu.cpu.regs.B, &emu.cpu.regs.E); break;
+				case 0x44: z80_LD_reg8_reg8(&emu.cpu.regs.B, &emu.cpu.regs.H); break;
+				case 0x45: z80_LD_reg8_reg8(&emu.cpu.regs.B, &emu.cpu.regs.L); break;
+				case 0x46: z80_LD_reg8_location_HL(&emu.cpu.regs.B); break;
+				case 0x47: z80_LD_reg8_reg8(&emu.cpu.regs.B, &emu.cpu.regs.A); break;
+				case 0x48: z80_LD_reg8_reg8(&emu.cpu.regs.C, &emu.cpu.regs.B); break;
+				case 0x49: z80_LD_reg8_reg8(&emu.cpu.regs.C, &emu.cpu.regs.C); break;
+				case 0x4A: z80_LD_reg8_reg8(&emu.cpu.regs.C, &emu.cpu.regs.D); break;
+				case 0x4B: z80_LD_reg8_reg8(&emu.cpu.regs.C, &emu.cpu.regs.E); break;
+				case 0x4C: z80_LD_reg8_reg8(&emu.cpu.regs.C, &emu.cpu.regs.H); break;
+				case 0x4D: z80_LD_reg8_reg8(&emu.cpu.regs.C, &emu.cpu.regs.L); break;
+				case 0x4E: z80_LD_reg8_location_HL(&emu.cpu.regs.C); break;
+				case 0x4F: z80_LD_reg8_reg8(&emu.cpu.regs.C, &emu.cpu.regs.A); break;
+				case 0x50: z80_LD_reg8_reg8(&emu.cpu.regs.D, &emu.cpu.regs.B); break;
+				case 0x51: z80_LD_reg8_reg8(&emu.cpu.regs.D, &emu.cpu.regs.C); break;
+				case 0x52: z80_LD_reg8_reg8(&emu.cpu.regs.D, &emu.cpu.regs.D); break;
+				case 0x53: z80_LD_reg8_reg8(&emu.cpu.regs.D, &emu.cpu.regs.E); break;
+				case 0x54: z80_LD_reg8_reg8(&emu.cpu.regs.D, &emu.cpu.regs.H); break;
+				case 0x55: z80_LD_reg8_reg8(&emu.cpu.regs.D, &emu.cpu.regs.L); break;
+				case 0x56: z80_LD_reg8_location_HL(&emu.cpu.regs.D); break;
+				case 0x57: z80_LD_reg8_reg8(&emu.cpu.regs.D, &emu.cpu.regs.A); break;
+				case 0x58: z80_LD_reg8_reg8(&emu.cpu.regs.E, &emu.cpu.regs.B); break;
+				case 0x59: z80_LD_reg8_reg8(&emu.cpu.regs.E, &emu.cpu.regs.C); break;
+				case 0x5A: z80_LD_reg8_reg8(&emu.cpu.regs.E, &emu.cpu.regs.D); break;
+				case 0x5B: z80_LD_reg8_reg8(&emu.cpu.regs.E, &emu.cpu.regs.E); break;
+				case 0x5C: z80_LD_reg8_reg8(&emu.cpu.regs.E, &emu.cpu.regs.H); break;
+				case 0x5D: z80_LD_reg8_reg8(&emu.cpu.regs.E, &emu.cpu.regs.L); break;
+				case 0x5E: z80_LD_reg8_location_HL(&emu.cpu.regs.E); break;
+				case 0x5F: z80_LD_reg8_reg8(&emu.cpu.regs.E, &emu.cpu.regs.A); break;
+				case 0x60: z80_LD_reg8_reg8(&emu.cpu.regs.H, &emu.cpu.regs.B); break;
+				case 0x61: z80_LD_reg8_reg8(&emu.cpu.regs.H, &emu.cpu.regs.C); break;
+				case 0x62: z80_LD_reg8_reg8(&emu.cpu.regs.H, &emu.cpu.regs.D); break;
+				case 0x63: z80_LD_reg8_reg8(&emu.cpu.regs.H, &emu.cpu.regs.E); break;
+				case 0x64: z80_LD_reg8_reg8(&emu.cpu.regs.H, &emu.cpu.regs.H); break;
+				case 0x65: z80_LD_reg8_reg8(&emu.cpu.regs.H, &emu.cpu.regs.L); break;
+				case 0x66: z80_LD_reg8_location_HL(&emu.cpu.regs.H); break;
+				case 0x67: z80_LD_reg8_reg8(&emu.cpu.regs.H, &emu.cpu.regs.A); break;
+				case 0x68: z80_LD_reg8_reg8(&emu.cpu.regs.L, &emu.cpu.regs.B); break;
+				case 0x69: z80_LD_reg8_reg8(&emu.cpu.regs.L, &emu.cpu.regs.C); break;
+				case 0x6A: z80_LD_reg8_reg8(&emu.cpu.regs.L, &emu.cpu.regs.D); break;
+				case 0x6B: z80_LD_reg8_reg8(&emu.cpu.regs.L, &emu.cpu.regs.E); break;
+				case 0x6C: z80_LD_reg8_reg8(&emu.cpu.regs.L, &emu.cpu.regs.H); break;
+				case 0x6D: z80_LD_reg8_reg8(&emu.cpu.regs.L, &emu.cpu.regs.L); break;
+				case 0x6E: z80_LD_reg8_location_HL(&emu.cpu.regs.L); break;
+				case 0x6F: z80_LD_reg8_reg8(&emu.cpu.regs.L, &emu.cpu.regs.A); break;
+				case 0x70: z80_LD_location_HL_reg8(&emu.cpu.regs.B); break;
+				case 0x71: z80_LD_location_HL_reg8(&emu.cpu.regs.C); break;
+				case 0x72: z80_LD_location_HL_reg8(&emu.cpu.regs.D); break;
+				case 0x73: z80_LD_location_HL_reg8(&emu.cpu.regs.E); break;
+				case 0x74: z80_LD_location_HL_reg8(&emu.cpu.regs.H); break;
+				case 0x75: z80_LD_location_HL_reg8(&emu.cpu.regs.L); break;
 				case 0x76: z80_HALT(); break;
-				case 0x77: z80_LD_location_HL_reg8(&regs.A); break;
-				case 0x78: z80_LD_reg8_reg8(&regs.A, &regs.B); break;
-				case 0x79: z80_LD_reg8_reg8(&regs.A, &regs.C); break;
-				case 0x7A: z80_LD_reg8_reg8(&regs.A, &regs.D); break;
-				case 0x7B: z80_LD_reg8_reg8(&regs.A, &regs.E); break;
-				case 0x7C: z80_LD_reg8_reg8(&regs.A, &regs.H); break;
-				case 0x7D: z80_LD_reg8_reg8(&regs.A, &regs.L); break;
-				case 0x7E: z80_LD_reg8_location_HL(&regs.A); break;
-				case 0x7F: z80_LD_reg8_reg8(&regs.A, &regs.A); break;
-				case 0x80: z80_ADD_A_reg8(&regs.B); break;
-				case 0x81: z80_ADD_A_reg8(&regs.C); break;
-				case 0x82: z80_ADD_A_reg8(&regs.D); break;
-				case 0x83: z80_ADD_A_reg8(&regs.E); break;
-				case 0x84: z80_ADD_A_reg8(&regs.H); break;
-				case 0x85: z80_ADD_A_reg8(&regs.L); break;
-				case 0x86: z80_ADD_A_reg8(&memory[regs.HL]); break;
-				case 0x87: z80_ADD_A_reg8(&regs.A); break;
-				case 0x88: z80_ADC_A_reg8(&regs.B); break;
-				case 0x89: z80_ADC_A_reg8(&regs.C); break;
-				case 0x8A: z80_ADC_A_reg8(&regs.D); break;
-				case 0x8B: z80_ADC_A_reg8(&regs.E); break;
-				case 0x8C: z80_ADC_A_reg8(&regs.H); break;
-				case 0x8D: z80_ADC_A_reg8(&regs.L); break;
-				case 0x8E: z80_ADC_A_reg8(&memory[regs.HL]); break;
-				case 0x8F: z80_ADC_A_reg8(&regs.A); break;
-				case 0x90: z80_SUB_reg8(&regs.B); break;
-				case 0x91: z80_SUB_reg8(&regs.C); break;
-				case 0x92: z80_SUB_reg8(&regs.D); break;
-				case 0x93: z80_SUB_reg8(&regs.E); break;
-				case 0x94: z80_SUB_reg8(&regs.H); break;
-				case 0x95: z80_SUB_reg8(&regs.L); break;
-				case 0x96: z80_SUB_reg8(&memory[regs.HL]); break;
-				case 0x97: z80_SUB_reg8(&regs.A); break;
-				case 0x98: z80_SBC_A_reg8(&regs.B); break;
-				case 0x99: z80_SBC_A_reg8(&regs.C); break;
-				case 0x9A: z80_SBC_A_reg8(&regs.D); break;
-				case 0x9B: z80_SBC_A_reg8(&regs.E); break;
-				case 0x9C: z80_SBC_A_reg8(&regs.H); break;
-				case 0x9D: z80_SBC_A_reg8(&regs.L); break;
-				case 0x9E: z80_SBC_A_reg8(&memory[regs.HL]); break;
-				case 0x9F: z80_SBC_A_reg8(&regs.A); break;
-				case 0xA0: z80_AND_reg8(&regs.B); break;
-				case 0xA1: z80_AND_reg8(&regs.C); break;
-				case 0xA2: z80_AND_reg8(&regs.D); break;
-				case 0xA3: z80_AND_reg8(&regs.E); break;
-				case 0xA4: z80_AND_reg8(&regs.H); break;
-				case 0xA5: z80_AND_reg8(&regs.L); break;
-				case 0xA6: z80_AND_reg8(&memory[regs.HL]); break;
-				case 0xA7: z80_AND_reg8(&regs.A); break;
-				case 0xA8: z80_XOR_reg8(&regs.B); break;
-				case 0xA9: z80_XOR_reg8(&regs.C); break;
-				case 0xAA: z80_XOR_reg8(&regs.D); break;
-				case 0xAB: z80_XOR_reg8(&regs.E); break;
-				case 0xAC: z80_XOR_reg8(&regs.H); break;
-				case 0xAD: z80_XOR_reg8(&regs.L); break;
-				case 0xAE: z80_XOR_reg8(&memory[regs.HL]); break;
-				case 0xAF: z80_XOR_reg8(&regs.A); break;
-				case 0xB0: z80_OR_reg8(&regs.B); break;
-				case 0xB1: z80_OR_reg8(&regs.C); break;
-				case 0xB2: z80_OR_reg8(&regs.D); break;
-				case 0xB3: z80_OR_reg8(&regs.E); break;
-				case 0xB4: z80_OR_reg8(&regs.H); break;
-				case 0xB5: z80_OR_reg8(&regs.L); break;
-				case 0xB6: z80_OR_reg8(&memory[regs.HL]); break;
-				case 0xB7: z80_OR_reg8(&regs.A); break;
-				case 0xB8: z80_CP_reg8(&regs.B); break;
-				case 0xB9: z80_CP_reg8(&regs.C); break;
-				case 0xBA: z80_CP_reg8(&regs.D); break;
-				case 0xBB: z80_CP_reg8(&regs.E); break;
-				case 0xBC: z80_CP_reg8(&regs.H); break;
-				case 0xBD: z80_CP_reg8(&regs.L); break;
-				case 0xBE: z80_CP_reg8(&memory[regs.HL]); break;
-				case 0xBF: z80_CP_reg8(&regs.A); break;
+				case 0x77: z80_LD_location_HL_reg8(&emu.cpu.regs.A); break;
+				case 0x78: z80_LD_reg8_reg8(&emu.cpu.regs.A, &emu.cpu.regs.B); break;
+				case 0x79: z80_LD_reg8_reg8(&emu.cpu.regs.A, &emu.cpu.regs.C); break;
+				case 0x7A: z80_LD_reg8_reg8(&emu.cpu.regs.A, &emu.cpu.regs.D); break;
+				case 0x7B: z80_LD_reg8_reg8(&emu.cpu.regs.A, &emu.cpu.regs.E); break;
+				case 0x7C: z80_LD_reg8_reg8(&emu.cpu.regs.A, &emu.cpu.regs.H); break;
+				case 0x7D: z80_LD_reg8_reg8(&emu.cpu.regs.A, &emu.cpu.regs.L); break;
+				case 0x7E: z80_LD_reg8_location_HL(&emu.cpu.regs.A); break;
+				case 0x7F: z80_LD_reg8_reg8(&emu.cpu.regs.A, &emu.cpu.regs.A); break;
+				case 0x80: z80_ADD_A_reg8(&emu.cpu.regs.B); break;
+				case 0x81: z80_ADD_A_reg8(&emu.cpu.regs.C); break;
+				case 0x82: z80_ADD_A_reg8(&emu.cpu.regs.D); break;
+				case 0x83: z80_ADD_A_reg8(&emu.cpu.regs.E); break;
+				case 0x84: z80_ADD_A_reg8(&emu.cpu.regs.H); break;
+				case 0x85: z80_ADD_A_reg8(&emu.cpu.regs.L); break;
+				case 0x86: z80_ADD_A_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+				case 0x87: z80_ADD_A_reg8(&emu.cpu.regs.A); break;
+				case 0x88: z80_ADC_A_reg8(&emu.cpu.regs.B); break;
+				case 0x89: z80_ADC_A_reg8(&emu.cpu.regs.C); break;
+				case 0x8A: z80_ADC_A_reg8(&emu.cpu.regs.D); break;
+				case 0x8B: z80_ADC_A_reg8(&emu.cpu.regs.E); break;
+				case 0x8C: z80_ADC_A_reg8(&emu.cpu.regs.H); break;
+				case 0x8D: z80_ADC_A_reg8(&emu.cpu.regs.L); break;
+				case 0x8E: z80_ADC_A_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+				case 0x8F: z80_ADC_A_reg8(&emu.cpu.regs.A); break;
+				case 0x90: z80_SUB_reg8(&emu.cpu.regs.B); break;
+				case 0x91: z80_SUB_reg8(&emu.cpu.regs.C); break;
+				case 0x92: z80_SUB_reg8(&emu.cpu.regs.D); break;
+				case 0x93: z80_SUB_reg8(&emu.cpu.regs.E); break;
+				case 0x94: z80_SUB_reg8(&emu.cpu.regs.H); break;
+				case 0x95: z80_SUB_reg8(&emu.cpu.regs.L); break;
+				case 0x96: z80_SUB_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+				case 0x97: z80_SUB_reg8(&emu.cpu.regs.A); break;
+				case 0x98: z80_SBC_A_reg8(&emu.cpu.regs.B); break;
+				case 0x99: z80_SBC_A_reg8(&emu.cpu.regs.C); break;
+				case 0x9A: z80_SBC_A_reg8(&emu.cpu.regs.D); break;
+				case 0x9B: z80_SBC_A_reg8(&emu.cpu.regs.E); break;
+				case 0x9C: z80_SBC_A_reg8(&emu.cpu.regs.H); break;
+				case 0x9D: z80_SBC_A_reg8(&emu.cpu.regs.L); break;
+				case 0x9E: z80_SBC_A_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+				case 0x9F: z80_SBC_A_reg8(&emu.cpu.regs.A); break;
+				case 0xA0: z80_AND_reg8(&emu.cpu.regs.B); break;
+				case 0xA1: z80_AND_reg8(&emu.cpu.regs.C); break;
+				case 0xA2: z80_AND_reg8(&emu.cpu.regs.D); break;
+				case 0xA3: z80_AND_reg8(&emu.cpu.regs.E); break;
+				case 0xA4: z80_AND_reg8(&emu.cpu.regs.H); break;
+				case 0xA5: z80_AND_reg8(&emu.cpu.regs.L); break;
+				case 0xA6: z80_AND_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+				case 0xA7: z80_AND_reg8(&emu.cpu.regs.A); break;
+				case 0xA8: z80_XOR_reg8(&emu.cpu.regs.B); break;
+				case 0xA9: z80_XOR_reg8(&emu.cpu.regs.C); break;
+				case 0xAA: z80_XOR_reg8(&emu.cpu.regs.D); break;
+				case 0xAB: z80_XOR_reg8(&emu.cpu.regs.E); break;
+				case 0xAC: z80_XOR_reg8(&emu.cpu.regs.H); break;
+				case 0xAD: z80_XOR_reg8(&emu.cpu.regs.L); break;
+				case 0xAE: z80_XOR_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+				case 0xAF: z80_XOR_reg8(&emu.cpu.regs.A); break;
+				case 0xB0: z80_OR_reg8(&emu.cpu.regs.B); break;
+				case 0xB1: z80_OR_reg8(&emu.cpu.regs.C); break;
+				case 0xB2: z80_OR_reg8(&emu.cpu.regs.D); break;
+				case 0xB3: z80_OR_reg8(&emu.cpu.regs.E); break;
+				case 0xB4: z80_OR_reg8(&emu.cpu.regs.H); break;
+				case 0xB5: z80_OR_reg8(&emu.cpu.regs.L); break;
+				case 0xB6: z80_OR_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+				case 0xB7: z80_OR_reg8(&emu.cpu.regs.A); break;
+				case 0xB8: z80_CP_reg8(&emu.cpu.regs.B); break;
+				case 0xB9: z80_CP_reg8(&emu.cpu.regs.C); break;
+				case 0xBA: z80_CP_reg8(&emu.cpu.regs.D); break;
+				case 0xBB: z80_CP_reg8(&emu.cpu.regs.E); break;
+				case 0xBC: z80_CP_reg8(&emu.cpu.regs.H); break;
+				case 0xBD: z80_CP_reg8(&emu.cpu.regs.L); break;
+				case 0xBE: z80_CP_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+				case 0xBF: z80_CP_reg8(&emu.cpu.regs.A); break;
 				case 0xC0: z80_RET_condition(0x01); break;
-				case 0xC1: z80_POP_reg16(&regs.B, &regs.C); break;
+				case 0xC1: z80_POP_reg16(&emu.cpu.regs.B, &emu.cpu.regs.C); break;
 				case 0xC2: z80_JP_condition_immediate(0x01); break;
 				case 0xC3: z80_JP_immediate(); break;
 				case 0xC4: z80_CALL_condition_immediate(0x01); break;
-				case 0xC5: z80_PUSH_reg16(&regs.B, &regs.C); break;
+				case 0xC5: z80_PUSH_reg16(&emu.cpu.regs.B, &emu.cpu.regs.C); break;
 				case 0xC6: z80_ADD_A_immediate(); break;
 				case 0xC7: z80_RST(0x00); break;
 				case 0xC8: z80_RET_condition(0x02); break;
@@ -2937,269 +3409,269 @@ void RunEmulation()
 				// Cover the special 0xCB opcodes.
 				case 0xCB:
 					{
-						opcode = memory[regs.PC];
-						regs.PC++;
+						opcode = emu.memory.romBank[emu.cpu.regs.PC];
+						emu.cpu.regs.PC++;
 						switch (opcode)
 						{
-						case 0x00: z80_RLC_reg8(&regs.B); break;
-						case 0x01: z80_RLC_reg8(&regs.C); break;
-						case 0x02: z80_RLC_reg8(&regs.D); break;
-						case 0x03: z80_RLC_reg8(&regs.E); break;
-						case 0x04: z80_RLC_reg8(&regs.H); break;
-						case 0x05: z80_RLC_reg8(&regs.L); break;
-						case 0x06: z80_RLC_reg8(&memory[regs.HL]); break;
-						case 0x07: z80_RLC_reg8(&regs.A); break;
-						case 0x08: z80_RRC_reg8(&regs.B); break;
-						case 0x09: z80_RRC_reg8(&regs.C); break;
-						case 0x0A: z80_RRC_reg8(&regs.D); break;
-						case 0x0B: z80_RRC_reg8(&regs.E); break;
-						case 0x0C: z80_RRC_reg8(&regs.H); break;
-						case 0x0D: z80_RRC_reg8(&regs.L); break;
-						case 0x0E: z80_RRC_reg8(&memory[regs.HL]); break;
-						case 0x0F: z80_RRC_reg8(&regs.A); break;
-						case 0x10: z80_RL_reg8(&regs.B); break;
-						case 0x11: z80_RL_reg8(&regs.C); break;
-						case 0x12: z80_RL_reg8(&regs.D); break;
-						case 0x13: z80_RL_reg8(&regs.E); break;
-						case 0x14: z80_RL_reg8(&regs.H); break;
-						case 0x15: z80_RL_reg8(&regs.L); break;
-						case 0x16: z80_RL_reg8(&memory[regs.HL]); break;
-						case 0x17: z80_RL_reg8(&regs.A); break;
-						case 0x18: z80_RR_reg8(&regs.B); break;
-						case 0x19: z80_RR_reg8(&regs.C); break;
-						case 0x1A: z80_RR_reg8(&regs.D); break;
-						case 0x1B: z80_RR_reg8(&regs.E); break;
-						case 0x1C: z80_RR_reg8(&regs.H); break;
-						case 0x1D: z80_RR_reg8(&regs.L); break;
-						case 0x1E: z80_RR_reg8(&memory[regs.HL]); break;
-						case 0x1F: z80_RR_reg8(&regs.A); break;
-						case 0x20: z80_SLA_reg8(&regs.B); break;
-						case 0x21: z80_SLA_reg8(&regs.C); break;
-						case 0x22: z80_SLA_reg8(&regs.D); break;
-						case 0x23: z80_SLA_reg8(&regs.E); break;
-						case 0x24: z80_SLA_reg8(&regs.H); break;
-						case 0x25: z80_SLA_reg8(&regs.L); break;
-						case 0x26: z80_SLA_reg8(&memory[regs.HL]); break;
-						case 0x27: z80_SLA_reg8(&regs.A); break;
-						case 0x28: z80_SRA_reg8(&regs.B); break;
-						case 0x29: z80_SRA_reg8(&regs.C); break;
-						case 0x2A: z80_SRA_reg8(&regs.D); break;
-						case 0x2B: z80_SRA_reg8(&regs.E); break;
-						case 0x2C: z80_SRA_reg8(&regs.H); break;
-						case 0x2D: z80_SRA_reg8(&regs.L); break;
-						case 0x2E: z80_SRA_reg8(&memory[regs.HL]); break;
-						case 0x2F: z80_SRA_reg8(&regs.A); break;
-						case 0x30: z80_SWAP_reg8(&regs.B); break;
-						case 0x31: z80_SWAP_reg8(&regs.C); break;
-						case 0x32: z80_SWAP_reg8(&regs.D); break;
-						case 0x33: z80_SWAP_reg8(&regs.E); break;
-						case 0x34: z80_SWAP_reg8(&regs.H); break;
-						case 0x35: z80_SWAP_reg8(&regs.L); break;
-						case 0x36: z80_SWAP_reg8(&memory[regs.HL]); break;
-						case 0x37: z80_SWAP_reg8(&regs.A); break;
-						case 0x38: z80_SRL_reg8(&regs.B); break;
-						case 0x39: z80_SRL_reg8(&regs.C); break;
-						case 0x3A: z80_SRL_reg8(&regs.D); break;
-						case 0x3B: z80_SRL_reg8(&regs.E); break;
-						case 0x3C: z80_SRL_reg8(&regs.H); break;
-						case 0x3D: z80_SRL_reg8(&regs.L); break;
-						case 0x3E: z80_SRL_reg8(&memory[regs.HL]); break;
-						case 0x3F: z80_SRL_reg8(&regs.A); break;
-						case 0x40: z80_BIT_bit_reg8(0x01, &regs.B); break;
-						case 0x41: z80_BIT_bit_reg8(0x01, &regs.C); break;
-						case 0x42: z80_BIT_bit_reg8(0x01, &regs.D); break;
-						case 0x43: z80_BIT_bit_reg8(0x01, &regs.E); break;
-						case 0x44: z80_BIT_bit_reg8(0x01, &regs.H); break;
-						case 0x45: z80_BIT_bit_reg8(0x01, &regs.L); break;
-						case 0x46: z80_BIT_bit_reg8(0x01, &memory[regs.HL]); break;
-						case 0x47: z80_BIT_bit_reg8(0x01, &regs.A); break;
-						case 0x48: z80_BIT_bit_reg8(0x02, &regs.B); break;
-						case 0x49: z80_BIT_bit_reg8(0x02, &regs.C); break;
-						case 0x4A: z80_BIT_bit_reg8(0x02, &regs.D); break;
-						case 0x4B: z80_BIT_bit_reg8(0x02, &regs.E); break;
-						case 0x4C: z80_BIT_bit_reg8(0x02, &regs.H); break;
-						case 0x4D: z80_BIT_bit_reg8(0x02, &regs.L); break;
-						case 0x4E: z80_BIT_bit_reg8(0x02, &memory[regs.HL]); break;
-						case 0x4F: z80_BIT_bit_reg8(0x02, &regs.A); break;
-						case 0x50: z80_BIT_bit_reg8(0x04, &regs.B); break;
-						case 0x51: z80_BIT_bit_reg8(0x04, &regs.C); break;
-						case 0x52: z80_BIT_bit_reg8(0x04, &regs.D); break;
-						case 0x53: z80_BIT_bit_reg8(0x04, &regs.E); break;
-						case 0x54: z80_BIT_bit_reg8(0x04, &regs.H); break;
-						case 0x55: z80_BIT_bit_reg8(0x04, &regs.L); break;
-						case 0x56: z80_BIT_bit_reg8(0x04, &memory[regs.HL]); break;
-						case 0x57: z80_BIT_bit_reg8(0x04, &regs.A); break;
-						case 0x58: z80_BIT_bit_reg8(0x08, &regs.B); break;
-						case 0x59: z80_BIT_bit_reg8(0x08, &regs.C); break;
-						case 0x5A: z80_BIT_bit_reg8(0x08, &regs.D); break;
-						case 0x5B: z80_BIT_bit_reg8(0x08, &regs.E); break;
-						case 0x5C: z80_BIT_bit_reg8(0x08, &regs.H); break;
-						case 0x5D: z80_BIT_bit_reg8(0x08, &regs.L); break;
-						case 0x5E: z80_BIT_bit_reg8(0x08, &memory[regs.HL]); break;
-						case 0x5F: z80_BIT_bit_reg8(0x08, &regs.A); break;
-						case 0x60: z80_BIT_bit_reg8(0x10, &regs.B); break;
-						case 0x61: z80_BIT_bit_reg8(0x10, &regs.C); break;
-						case 0x62: z80_BIT_bit_reg8(0x10, &regs.D); break;
-						case 0x63: z80_BIT_bit_reg8(0x10, &regs.E); break;
-						case 0x64: z80_BIT_bit_reg8(0x10, &regs.H); break;
-						case 0x65: z80_BIT_bit_reg8(0x10, &regs.L); break;
-						case 0x66: z80_BIT_bit_reg8(0x10, &memory[regs.HL]); break;
-						case 0x67: z80_BIT_bit_reg8(0x10, &regs.A); break;
-						case 0x68: z80_BIT_bit_reg8(0x20, &regs.B); break;
-						case 0x69: z80_BIT_bit_reg8(0x20, &regs.C); break;
-						case 0x6A: z80_BIT_bit_reg8(0x20, &regs.D); break;
-						case 0x6B: z80_BIT_bit_reg8(0x20, &regs.E); break;
-						case 0x6C: z80_BIT_bit_reg8(0x20, &regs.H); break;
-						case 0x6D: z80_BIT_bit_reg8(0x20, &regs.L); break;
-						case 0x6E: z80_BIT_bit_reg8(0x20, &memory[regs.HL]); break;
-						case 0x6F: z80_BIT_bit_reg8(0x20, &regs.A); break;
-						case 0x70: z80_BIT_bit_reg8(0x40, &regs.B); break;
-						case 0x71: z80_BIT_bit_reg8(0x40, &regs.C); break;
-						case 0x72: z80_BIT_bit_reg8(0x40, &regs.D); break;
-						case 0x73: z80_BIT_bit_reg8(0x40, &regs.E); break;
-						case 0x74: z80_BIT_bit_reg8(0x40, &regs.H); break;
-						case 0x75: z80_BIT_bit_reg8(0x40, &regs.L); break;
-						case 0x76: z80_BIT_bit_reg8(0x40, &memory[regs.HL]); break;
-						case 0x77: z80_BIT_bit_reg8(0x40, &regs.A); break;
-						case 0x78: z80_BIT_bit_reg8(0x80, &regs.B); break;
-						case 0x79: z80_BIT_bit_reg8(0x80, &regs.C); break;
-						case 0x7A: z80_BIT_bit_reg8(0x80, &regs.D); break;
-						case 0x7B: z80_BIT_bit_reg8(0x80, &regs.E); break;
-						case 0x7C: z80_BIT_bit_reg8(0x80, &regs.H); break;
-						case 0x7D: z80_BIT_bit_reg8(0x80, &regs.L); break;
-						case 0x7E: z80_BIT_bit_reg8(0x80, &memory[regs.HL]); break;
-						case 0x7F: z80_BIT_bit_reg8(0x80, &regs.A); break;
-						case 0x80: z80_RES_bit_reg8(0x01, &regs.B); break;
-						case 0x81: z80_RES_bit_reg8(0x01, &regs.C); break;
-						case 0x82: z80_RES_bit_reg8(0x01, &regs.D); break;
-						case 0x83: z80_RES_bit_reg8(0x01, &regs.E); break;
-						case 0x84: z80_RES_bit_reg8(0x01, &regs.H); break;
-						case 0x85: z80_RES_bit_reg8(0x01, &regs.L); break;
-						case 0x86: z80_RES_bit_reg8(0x01, &memory[regs.HL]); break;
-						case 0x87: z80_RES_bit_reg8(0x01, &regs.A); break;
-						case 0x88: z80_RES_bit_reg8(0x02, &regs.B); break;
-						case 0x89: z80_RES_bit_reg8(0x02, &regs.C); break;
-						case 0x8A: z80_RES_bit_reg8(0x02, &regs.D); break;
-						case 0x8B: z80_RES_bit_reg8(0x02, &regs.E); break;
-						case 0x8C: z80_RES_bit_reg8(0x02, &regs.H); break;
-						case 0x8D: z80_RES_bit_reg8(0x02, &regs.L); break;
-						case 0x8E: z80_RES_bit_reg8(0x02, &memory[regs.HL]); break;
-						case 0x8F: z80_RES_bit_reg8(0x02, &regs.A); break;
-						case 0x90: z80_RES_bit_reg8(0x04, &regs.B); break;
-						case 0x91: z80_RES_bit_reg8(0x04, &regs.C); break;
-						case 0x92: z80_RES_bit_reg8(0x04, &regs.D); break;
-						case 0x93: z80_RES_bit_reg8(0x04, &regs.E); break;
-						case 0x94: z80_RES_bit_reg8(0x04, &regs.H); break;
-						case 0x95: z80_RES_bit_reg8(0x04, &regs.L); break;
-						case 0x96: z80_RES_bit_reg8(0x04, &memory[regs.HL]); break;
-						case 0x97: z80_RES_bit_reg8(0x04, &regs.A); break;
-						case 0x98: z80_RES_bit_reg8(0x08, &regs.B); break;
-						case 0x99: z80_RES_bit_reg8(0x08, &regs.C); break;
-						case 0x9A: z80_RES_bit_reg8(0x08, &regs.D); break;
-						case 0x9B: z80_RES_bit_reg8(0x08, &regs.E); break;
-						case 0x9C: z80_RES_bit_reg8(0x08, &regs.H); break;
-						case 0x9D: z80_RES_bit_reg8(0x08, &regs.L); break;
-						case 0x9E: z80_RES_bit_reg8(0x08, &memory[regs.HL]); break;
-						case 0x9F: z80_RES_bit_reg8(0x08, &regs.A); break;
-						case 0xA0: z80_RES_bit_reg8(0x10, &regs.B); break;
-						case 0xA1: z80_RES_bit_reg8(0x10, &regs.C); break;
-						case 0xA2: z80_RES_bit_reg8(0x10, &regs.D); break;
-						case 0xA3: z80_RES_bit_reg8(0x10, &regs.E); break;
-						case 0xA4: z80_RES_bit_reg8(0x10, &regs.H); break;
-						case 0xA5: z80_RES_bit_reg8(0x10, &regs.L); break;
-						case 0xA6: z80_RES_bit_reg8(0x10, &memory[regs.HL]); break;
-						case 0xA7: z80_RES_bit_reg8(0x10, &regs.A); break;
-						case 0xA8: z80_RES_bit_reg8(0x20, &regs.B); break;
-						case 0xA9: z80_RES_bit_reg8(0x20, &regs.C); break;
-						case 0xAA: z80_RES_bit_reg8(0x20, &regs.D); break;
-						case 0xAB: z80_RES_bit_reg8(0x20, &regs.E); break;
-						case 0xAC: z80_RES_bit_reg8(0x20, &regs.H); break;
-						case 0xAD: z80_RES_bit_reg8(0x20, &regs.L); break;
-						case 0xAE: z80_RES_bit_reg8(0x20, &memory[regs.HL]); break;
-						case 0xAF: z80_RES_bit_reg8(0x20, &regs.A); break;
-						case 0xB0: z80_RES_bit_reg8(0x40, &regs.B); break;
-						case 0xB1: z80_RES_bit_reg8(0x40, &regs.C); break;
-						case 0xB2: z80_RES_bit_reg8(0x40, &regs.D); break;
-						case 0xB3: z80_RES_bit_reg8(0x40, &regs.E); break;
-						case 0xB4: z80_RES_bit_reg8(0x40, &regs.H); break;
-						case 0xB5: z80_RES_bit_reg8(0x40, &regs.L); break;
-						case 0xB6: z80_RES_bit_reg8(0x40, &memory[regs.HL]); break;
-						case 0xB7: z80_RES_bit_reg8(0x40, &regs.A); break;
-						case 0xB8: z80_RES_bit_reg8(0x80, &regs.B); break;
-						case 0xB9: z80_RES_bit_reg8(0x80, &regs.C); break;
-						case 0xBA: z80_RES_bit_reg8(0x80, &regs.D); break;
-						case 0xBB: z80_RES_bit_reg8(0x80, &regs.E); break;
-						case 0xBC: z80_RES_bit_reg8(0x80, &regs.H); break;
-						case 0xBD: z80_RES_bit_reg8(0x80, &regs.L); break;
-						case 0xBE: z80_RES_bit_reg8(0x80, &memory[regs.HL]); break;
-						case 0xBF: z80_RES_bit_reg8(0x80, &regs.A); break;
-						case 0xC0: z80_SET_bit_reg8(0x01, &regs.B); break;
-						case 0xC1: z80_SET_bit_reg8(0x01, &regs.C); break;
-						case 0xC2: z80_SET_bit_reg8(0x01, &regs.D); break;
-						case 0xC3: z80_SET_bit_reg8(0x01, &regs.E); break;
-						case 0xC4: z80_SET_bit_reg8(0x01, &regs.H); break;
-						case 0xC5: z80_SET_bit_reg8(0x01, &regs.L); break;
-						case 0xC6: z80_SET_bit_reg8(0x01, &memory[regs.HL]); break;
-						case 0xC7: z80_SET_bit_reg8(0x01, &regs.A); break;
-						case 0xC8: z80_SET_bit_reg8(0x02, &regs.B); break;
-						case 0xC9: z80_SET_bit_reg8(0x02, &regs.C); break;
-						case 0xCA: z80_SET_bit_reg8(0x02, &regs.D); break;
-						case 0xCB: z80_SET_bit_reg8(0x02, &regs.E); break;
-						case 0xCC: z80_SET_bit_reg8(0x02, &regs.H); break;
-						case 0xCD: z80_SET_bit_reg8(0x02, &regs.L); break;
-						case 0xCE: z80_SET_bit_reg8(0x02, &memory[regs.HL]); break;
-						case 0xCF: z80_SET_bit_reg8(0x02, &regs.A); break;
-						case 0xD0: z80_SET_bit_reg8(0x04, &regs.B); break;
-						case 0xD1: z80_SET_bit_reg8(0x04, &regs.C); break;
-						case 0xD2: z80_SET_bit_reg8(0x04, &regs.D); break;
-						case 0xD3: z80_SET_bit_reg8(0x04, &regs.E); break;
-						case 0xD4: z80_SET_bit_reg8(0x04, &regs.H); break;
-						case 0xD5: z80_SET_bit_reg8(0x04, &regs.L); break;
-						case 0xD6: z80_SET_bit_reg8(0x04, &memory[regs.HL]); break;
-						case 0xD7: z80_SET_bit_reg8(0x04, &regs.A); break;
-						case 0xD8: z80_SET_bit_reg8(0x08, &regs.B); break;
-						case 0xD9: z80_SET_bit_reg8(0x08, &regs.C); break;
-						case 0xDA: z80_SET_bit_reg8(0x08, &regs.D); break;
-						case 0xDB: z80_SET_bit_reg8(0x08, &regs.E); break;
-						case 0xDC: z80_SET_bit_reg8(0x08, &regs.H); break;
-						case 0xDD: z80_SET_bit_reg8(0x08, &regs.L); break;
-						case 0xDE: z80_SET_bit_reg8(0x08, &memory[regs.HL]); break;
-						case 0xDF: z80_SET_bit_reg8(0x08, &regs.A); break;
-						case 0xE0: z80_SET_bit_reg8(0x10, &regs.B); break;
-						case 0xE1: z80_SET_bit_reg8(0x10, &regs.C); break;
-						case 0xE2: z80_SET_bit_reg8(0x10, &regs.D); break;
-						case 0xE3: z80_SET_bit_reg8(0x10, &regs.E); break;
-						case 0xE4: z80_SET_bit_reg8(0x10, &regs.H); break;
-						case 0xE5: z80_SET_bit_reg8(0x10, &regs.L); break;
-						case 0xE6: z80_SET_bit_reg8(0x10, &memory[regs.HL]); break;
-						case 0xE7: z80_SET_bit_reg8(0x10, &regs.A); break;
-						case 0xE8: z80_SET_bit_reg8(0x20, &regs.B); break;
-						case 0xE9: z80_SET_bit_reg8(0x20, &regs.C); break;
-						case 0xEA: z80_SET_bit_reg8(0x20, &regs.D); break;
-						case 0xEB: z80_SET_bit_reg8(0x20, &regs.E); break;
-						case 0xEC: z80_SET_bit_reg8(0x20, &regs.H); break;
-						case 0xED: z80_SET_bit_reg8(0x20, &regs.L); break;
-						case 0xEE: z80_SET_bit_reg8(0x20, &memory[regs.HL]); break;
-						case 0xEF: z80_SET_bit_reg8(0x20, &regs.A); break;
-						case 0xF0: z80_SET_bit_reg8(0x40, &regs.B); break;
-						case 0xF1: z80_SET_bit_reg8(0x40, &regs.C); break;
-						case 0xF2: z80_SET_bit_reg8(0x40, &regs.D); break;
-						case 0xF3: z80_SET_bit_reg8(0x40, &regs.E); break;
-						case 0xF4: z80_SET_bit_reg8(0x40, &regs.H); break;
-						case 0xF5: z80_SET_bit_reg8(0x40, &regs.L); break;
-						case 0xF6: z80_SET_bit_reg8(0x40, &memory[regs.HL]); break;
-						case 0xF7: z80_SET_bit_reg8(0x40, &regs.A); break;
-						case 0xF8: z80_SET_bit_reg8(0x80, &regs.B); break;
-						case 0xF9: z80_SET_bit_reg8(0x80, &regs.C); break;
-						case 0xFA: z80_SET_bit_reg8(0x80, &regs.D); break;
-						case 0xFB: z80_SET_bit_reg8(0x80, &regs.E); break;
-						case 0xFC: z80_SET_bit_reg8(0x80, &regs.H); break;
-						case 0xFD: z80_SET_bit_reg8(0x80, &regs.L); break;
-						case 0xFE: z80_SET_bit_reg8(0x80, &memory[regs.HL]); break;
-						case 0xFF: z80_SET_bit_reg8(0x80, &regs.A); break;
+						case 0x00: z80_RLC_reg8(&emu.cpu.regs.B); break;
+						case 0x01: z80_RLC_reg8(&emu.cpu.regs.C); break;
+						case 0x02: z80_RLC_reg8(&emu.cpu.regs.D); break;
+						case 0x03: z80_RLC_reg8(&emu.cpu.regs.E); break;
+						case 0x04: z80_RLC_reg8(&emu.cpu.regs.H); break;
+						case 0x05: z80_RLC_reg8(&emu.cpu.regs.L); break;
+						case 0x06: z80_RLC_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x07: z80_RLC_reg8(&emu.cpu.regs.A); break;
+						case 0x08: z80_RRC_reg8(&emu.cpu.regs.B); break;
+						case 0x09: z80_RRC_reg8(&emu.cpu.regs.C); break;
+						case 0x0A: z80_RRC_reg8(&emu.cpu.regs.D); break;
+						case 0x0B: z80_RRC_reg8(&emu.cpu.regs.E); break;
+						case 0x0C: z80_RRC_reg8(&emu.cpu.regs.H); break;
+						case 0x0D: z80_RRC_reg8(&emu.cpu.regs.L); break;
+						case 0x0E: z80_RRC_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x0F: z80_RRC_reg8(&emu.cpu.regs.A); break;
+						case 0x10: z80_RL_reg8(&emu.cpu.regs.B); break;
+						case 0x11: z80_RL_reg8(&emu.cpu.regs.C); break;
+						case 0x12: z80_RL_reg8(&emu.cpu.regs.D); break;
+						case 0x13: z80_RL_reg8(&emu.cpu.regs.E); break;
+						case 0x14: z80_RL_reg8(&emu.cpu.regs.H); break;
+						case 0x15: z80_RL_reg8(&emu.cpu.regs.L); break;
+						case 0x16: z80_RL_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x17: z80_RL_reg8(&emu.cpu.regs.A); break;
+						case 0x18: z80_RR_reg8(&emu.cpu.regs.B); break;
+						case 0x19: z80_RR_reg8(&emu.cpu.regs.C); break;
+						case 0x1A: z80_RR_reg8(&emu.cpu.regs.D); break;
+						case 0x1B: z80_RR_reg8(&emu.cpu.regs.E); break;
+						case 0x1C: z80_RR_reg8(&emu.cpu.regs.H); break;
+						case 0x1D: z80_RR_reg8(&emu.cpu.regs.L); break;
+						case 0x1E: z80_RR_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x1F: z80_RR_reg8(&emu.cpu.regs.A); break;
+						case 0x20: z80_SLA_reg8(&emu.cpu.regs.B); break;
+						case 0x21: z80_SLA_reg8(&emu.cpu.regs.C); break;
+						case 0x22: z80_SLA_reg8(&emu.cpu.regs.D); break;
+						case 0x23: z80_SLA_reg8(&emu.cpu.regs.E); break;
+						case 0x24: z80_SLA_reg8(&emu.cpu.regs.H); break;
+						case 0x25: z80_SLA_reg8(&emu.cpu.regs.L); break;
+						case 0x26: z80_SLA_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x27: z80_SLA_reg8(&emu.cpu.regs.A); break;
+						case 0x28: z80_SRA_reg8(&emu.cpu.regs.B); break;
+						case 0x29: z80_SRA_reg8(&emu.cpu.regs.C); break;
+						case 0x2A: z80_SRA_reg8(&emu.cpu.regs.D); break;
+						case 0x2B: z80_SRA_reg8(&emu.cpu.regs.E); break;
+						case 0x2C: z80_SRA_reg8(&emu.cpu.regs.H); break;
+						case 0x2D: z80_SRA_reg8(&emu.cpu.regs.L); break;
+						case 0x2E: z80_SRA_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x2F: z80_SRA_reg8(&emu.cpu.regs.A); break;
+						case 0x30: z80_SWAP_reg8(&emu.cpu.regs.B); break;
+						case 0x31: z80_SWAP_reg8(&emu.cpu.regs.C); break;
+						case 0x32: z80_SWAP_reg8(&emu.cpu.regs.D); break;
+						case 0x33: z80_SWAP_reg8(&emu.cpu.regs.E); break;
+						case 0x34: z80_SWAP_reg8(&emu.cpu.regs.H); break;
+						case 0x35: z80_SWAP_reg8(&emu.cpu.regs.L); break;
+						case 0x36: z80_SWAP_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x37: z80_SWAP_reg8(&emu.cpu.regs.A); break;
+						case 0x38: z80_SRL_reg8(&emu.cpu.regs.B); break;
+						case 0x39: z80_SRL_reg8(&emu.cpu.regs.C); break;
+						case 0x3A: z80_SRL_reg8(&emu.cpu.regs.D); break;
+						case 0x3B: z80_SRL_reg8(&emu.cpu.regs.E); break;
+						case 0x3C: z80_SRL_reg8(&emu.cpu.regs.H); break;
+						case 0x3D: z80_SRL_reg8(&emu.cpu.regs.L); break;
+						case 0x3E: z80_SRL_reg8(&emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x3F: z80_SRL_reg8(&emu.cpu.regs.A); break;
+						case 0x40: z80_BIT_bit_reg8(0x01, &emu.cpu.regs.B); break;
+						case 0x41: z80_BIT_bit_reg8(0x01, &emu.cpu.regs.C); break;
+						case 0x42: z80_BIT_bit_reg8(0x01, &emu.cpu.regs.D); break;
+						case 0x43: z80_BIT_bit_reg8(0x01, &emu.cpu.regs.E); break;
+						case 0x44: z80_BIT_bit_reg8(0x01, &emu.cpu.regs.H); break;
+						case 0x45: z80_BIT_bit_reg8(0x01, &emu.cpu.regs.L); break;
+						case 0x46: z80_BIT_bit_reg8(0x01, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x47: z80_BIT_bit_reg8(0x01, &emu.cpu.regs.A); break;
+						case 0x48: z80_BIT_bit_reg8(0x02, &emu.cpu.regs.B); break;
+						case 0x49: z80_BIT_bit_reg8(0x02, &emu.cpu.regs.C); break;
+						case 0x4A: z80_BIT_bit_reg8(0x02, &emu.cpu.regs.D); break;
+						case 0x4B: z80_BIT_bit_reg8(0x02, &emu.cpu.regs.E); break;
+						case 0x4C: z80_BIT_bit_reg8(0x02, &emu.cpu.regs.H); break;
+						case 0x4D: z80_BIT_bit_reg8(0x02, &emu.cpu.regs.L); break;
+						case 0x4E: z80_BIT_bit_reg8(0x02, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x4F: z80_BIT_bit_reg8(0x02, &emu.cpu.regs.A); break;
+						case 0x50: z80_BIT_bit_reg8(0x04, &emu.cpu.regs.B); break;
+						case 0x51: z80_BIT_bit_reg8(0x04, &emu.cpu.regs.C); break;
+						case 0x52: z80_BIT_bit_reg8(0x04, &emu.cpu.regs.D); break;
+						case 0x53: z80_BIT_bit_reg8(0x04, &emu.cpu.regs.E); break;
+						case 0x54: z80_BIT_bit_reg8(0x04, &emu.cpu.regs.H); break;
+						case 0x55: z80_BIT_bit_reg8(0x04, &emu.cpu.regs.L); break;
+						case 0x56: z80_BIT_bit_reg8(0x04, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x57: z80_BIT_bit_reg8(0x04, &emu.cpu.regs.A); break;
+						case 0x58: z80_BIT_bit_reg8(0x08, &emu.cpu.regs.B); break;
+						case 0x59: z80_BIT_bit_reg8(0x08, &emu.cpu.regs.C); break;
+						case 0x5A: z80_BIT_bit_reg8(0x08, &emu.cpu.regs.D); break;
+						case 0x5B: z80_BIT_bit_reg8(0x08, &emu.cpu.regs.E); break;
+						case 0x5C: z80_BIT_bit_reg8(0x08, &emu.cpu.regs.H); break;
+						case 0x5D: z80_BIT_bit_reg8(0x08, &emu.cpu.regs.L); break;
+						case 0x5E: z80_BIT_bit_reg8(0x08, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x5F: z80_BIT_bit_reg8(0x08, &emu.cpu.regs.A); break;
+						case 0x60: z80_BIT_bit_reg8(0x10, &emu.cpu.regs.B); break;
+						case 0x61: z80_BIT_bit_reg8(0x10, &emu.cpu.regs.C); break;
+						case 0x62: z80_BIT_bit_reg8(0x10, &emu.cpu.regs.D); break;
+						case 0x63: z80_BIT_bit_reg8(0x10, &emu.cpu.regs.E); break;
+						case 0x64: z80_BIT_bit_reg8(0x10, &emu.cpu.regs.H); break;
+						case 0x65: z80_BIT_bit_reg8(0x10, &emu.cpu.regs.L); break;
+						case 0x66: z80_BIT_bit_reg8(0x10, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x67: z80_BIT_bit_reg8(0x10, &emu.cpu.regs.A); break;
+						case 0x68: z80_BIT_bit_reg8(0x20, &emu.cpu.regs.B); break;
+						case 0x69: z80_BIT_bit_reg8(0x20, &emu.cpu.regs.C); break;
+						case 0x6A: z80_BIT_bit_reg8(0x20, &emu.cpu.regs.D); break;
+						case 0x6B: z80_BIT_bit_reg8(0x20, &emu.cpu.regs.E); break;
+						case 0x6C: z80_BIT_bit_reg8(0x20, &emu.cpu.regs.H); break;
+						case 0x6D: z80_BIT_bit_reg8(0x20, &emu.cpu.regs.L); break;
+						case 0x6E: z80_BIT_bit_reg8(0x20, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x6F: z80_BIT_bit_reg8(0x20, &emu.cpu.regs.A); break;
+						case 0x70: z80_BIT_bit_reg8(0x40, &emu.cpu.regs.B); break;
+						case 0x71: z80_BIT_bit_reg8(0x40, &emu.cpu.regs.C); break;
+						case 0x72: z80_BIT_bit_reg8(0x40, &emu.cpu.regs.D); break;
+						case 0x73: z80_BIT_bit_reg8(0x40, &emu.cpu.regs.E); break;
+						case 0x74: z80_BIT_bit_reg8(0x40, &emu.cpu.regs.H); break;
+						case 0x75: z80_BIT_bit_reg8(0x40, &emu.cpu.regs.L); break;
+						case 0x76: z80_BIT_bit_reg8(0x40, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x77: z80_BIT_bit_reg8(0x40, &emu.cpu.regs.A); break;
+						case 0x78: z80_BIT_bit_reg8(0x80, &emu.cpu.regs.B); break;
+						case 0x79: z80_BIT_bit_reg8(0x80, &emu.cpu.regs.C); break;
+						case 0x7A: z80_BIT_bit_reg8(0x80, &emu.cpu.regs.D); break;
+						case 0x7B: z80_BIT_bit_reg8(0x80, &emu.cpu.regs.E); break;
+						case 0x7C: z80_BIT_bit_reg8(0x80, &emu.cpu.regs.H); break;
+						case 0x7D: z80_BIT_bit_reg8(0x80, &emu.cpu.regs.L); break;
+						case 0x7E: z80_BIT_bit_reg8(0x80, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x7F: z80_BIT_bit_reg8(0x80, &emu.cpu.regs.A); break;
+						case 0x80: z80_RES_bit_reg8(0x01, &emu.cpu.regs.B); break;
+						case 0x81: z80_RES_bit_reg8(0x01, &emu.cpu.regs.C); break;
+						case 0x82: z80_RES_bit_reg8(0x01, &emu.cpu.regs.D); break;
+						case 0x83: z80_RES_bit_reg8(0x01, &emu.cpu.regs.E); break;
+						case 0x84: z80_RES_bit_reg8(0x01, &emu.cpu.regs.H); break;
+						case 0x85: z80_RES_bit_reg8(0x01, &emu.cpu.regs.L); break;
+						case 0x86: z80_RES_bit_reg8(0x01, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x87: z80_RES_bit_reg8(0x01, &emu.cpu.regs.A); break;
+						case 0x88: z80_RES_bit_reg8(0x02, &emu.cpu.regs.B); break;
+						case 0x89: z80_RES_bit_reg8(0x02, &emu.cpu.regs.C); break;
+						case 0x8A: z80_RES_bit_reg8(0x02, &emu.cpu.regs.D); break;
+						case 0x8B: z80_RES_bit_reg8(0x02, &emu.cpu.regs.E); break;
+						case 0x8C: z80_RES_bit_reg8(0x02, &emu.cpu.regs.H); break;
+						case 0x8D: z80_RES_bit_reg8(0x02, &emu.cpu.regs.L); break;
+						case 0x8E: z80_RES_bit_reg8(0x02, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x8F: z80_RES_bit_reg8(0x02, &emu.cpu.regs.A); break;
+						case 0x90: z80_RES_bit_reg8(0x04, &emu.cpu.regs.B); break;
+						case 0x91: z80_RES_bit_reg8(0x04, &emu.cpu.regs.C); break;
+						case 0x92: z80_RES_bit_reg8(0x04, &emu.cpu.regs.D); break;
+						case 0x93: z80_RES_bit_reg8(0x04, &emu.cpu.regs.E); break;
+						case 0x94: z80_RES_bit_reg8(0x04, &emu.cpu.regs.H); break;
+						case 0x95: z80_RES_bit_reg8(0x04, &emu.cpu.regs.L); break;
+						case 0x96: z80_RES_bit_reg8(0x04, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x97: z80_RES_bit_reg8(0x04, &emu.cpu.regs.A); break;
+						case 0x98: z80_RES_bit_reg8(0x08, &emu.cpu.regs.B); break;
+						case 0x99: z80_RES_bit_reg8(0x08, &emu.cpu.regs.C); break;
+						case 0x9A: z80_RES_bit_reg8(0x08, &emu.cpu.regs.D); break;
+						case 0x9B: z80_RES_bit_reg8(0x08, &emu.cpu.regs.E); break;
+						case 0x9C: z80_RES_bit_reg8(0x08, &emu.cpu.regs.H); break;
+						case 0x9D: z80_RES_bit_reg8(0x08, &emu.cpu.regs.L); break;
+						case 0x9E: z80_RES_bit_reg8(0x08, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0x9F: z80_RES_bit_reg8(0x08, &emu.cpu.regs.A); break;
+						case 0xA0: z80_RES_bit_reg8(0x10, &emu.cpu.regs.B); break;
+						case 0xA1: z80_RES_bit_reg8(0x10, &emu.cpu.regs.C); break;
+						case 0xA2: z80_RES_bit_reg8(0x10, &emu.cpu.regs.D); break;
+						case 0xA3: z80_RES_bit_reg8(0x10, &emu.cpu.regs.E); break;
+						case 0xA4: z80_RES_bit_reg8(0x10, &emu.cpu.regs.H); break;
+						case 0xA5: z80_RES_bit_reg8(0x10, &emu.cpu.regs.L); break;
+						case 0xA6: z80_RES_bit_reg8(0x10, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0xA7: z80_RES_bit_reg8(0x10, &emu.cpu.regs.A); break;
+						case 0xA8: z80_RES_bit_reg8(0x20, &emu.cpu.regs.B); break;
+						case 0xA9: z80_RES_bit_reg8(0x20, &emu.cpu.regs.C); break;
+						case 0xAA: z80_RES_bit_reg8(0x20, &emu.cpu.regs.D); break;
+						case 0xAB: z80_RES_bit_reg8(0x20, &emu.cpu.regs.E); break;
+						case 0xAC: z80_RES_bit_reg8(0x20, &emu.cpu.regs.H); break;
+						case 0xAD: z80_RES_bit_reg8(0x20, &emu.cpu.regs.L); break;
+						case 0xAE: z80_RES_bit_reg8(0x20, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0xAF: z80_RES_bit_reg8(0x20, &emu.cpu.regs.A); break;
+						case 0xB0: z80_RES_bit_reg8(0x40, &emu.cpu.regs.B); break;
+						case 0xB1: z80_RES_bit_reg8(0x40, &emu.cpu.regs.C); break;
+						case 0xB2: z80_RES_bit_reg8(0x40, &emu.cpu.regs.D); break;
+						case 0xB3: z80_RES_bit_reg8(0x40, &emu.cpu.regs.E); break;
+						case 0xB4: z80_RES_bit_reg8(0x40, &emu.cpu.regs.H); break;
+						case 0xB5: z80_RES_bit_reg8(0x40, &emu.cpu.regs.L); break;
+						case 0xB6: z80_RES_bit_reg8(0x40, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0xB7: z80_RES_bit_reg8(0x40, &emu.cpu.regs.A); break;
+						case 0xB8: z80_RES_bit_reg8(0x80, &emu.cpu.regs.B); break;
+						case 0xB9: z80_RES_bit_reg8(0x80, &emu.cpu.regs.C); break;
+						case 0xBA: z80_RES_bit_reg8(0x80, &emu.cpu.regs.D); break;
+						case 0xBB: z80_RES_bit_reg8(0x80, &emu.cpu.regs.E); break;
+						case 0xBC: z80_RES_bit_reg8(0x80, &emu.cpu.regs.H); break;
+						case 0xBD: z80_RES_bit_reg8(0x80, &emu.cpu.regs.L); break;
+						case 0xBE: z80_RES_bit_reg8(0x80, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0xBF: z80_RES_bit_reg8(0x80, &emu.cpu.regs.A); break;
+						case 0xC0: z80_SET_bit_reg8(0x01, &emu.cpu.regs.B); break;
+						case 0xC1: z80_SET_bit_reg8(0x01, &emu.cpu.regs.C); break;
+						case 0xC2: z80_SET_bit_reg8(0x01, &emu.cpu.regs.D); break;
+						case 0xC3: z80_SET_bit_reg8(0x01, &emu.cpu.regs.E); break;
+						case 0xC4: z80_SET_bit_reg8(0x01, &emu.cpu.regs.H); break;
+						case 0xC5: z80_SET_bit_reg8(0x01, &emu.cpu.regs.L); break;
+						case 0xC6: z80_SET_bit_reg8(0x01, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0xC7: z80_SET_bit_reg8(0x01, &emu.cpu.regs.A); break;
+						case 0xC8: z80_SET_bit_reg8(0x02, &emu.cpu.regs.B); break;
+						case 0xC9: z80_SET_bit_reg8(0x02, &emu.cpu.regs.C); break;
+						case 0xCA: z80_SET_bit_reg8(0x02, &emu.cpu.regs.D); break;
+						case 0xCB: z80_SET_bit_reg8(0x02, &emu.cpu.regs.E); break;
+						case 0xCC: z80_SET_bit_reg8(0x02, &emu.cpu.regs.H); break;
+						case 0xCD: z80_SET_bit_reg8(0x02, &emu.cpu.regs.L); break;
+						case 0xCE: z80_SET_bit_reg8(0x02, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0xCF: z80_SET_bit_reg8(0x02, &emu.cpu.regs.A); break;
+						case 0xD0: z80_SET_bit_reg8(0x04, &emu.cpu.regs.B); break;
+						case 0xD1: z80_SET_bit_reg8(0x04, &emu.cpu.regs.C); break;
+						case 0xD2: z80_SET_bit_reg8(0x04, &emu.cpu.regs.D); break;
+						case 0xD3: z80_SET_bit_reg8(0x04, &emu.cpu.regs.E); break;
+						case 0xD4: z80_SET_bit_reg8(0x04, &emu.cpu.regs.H); break;
+						case 0xD5: z80_SET_bit_reg8(0x04, &emu.cpu.regs.L); break;
+						case 0xD6: z80_SET_bit_reg8(0x04, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0xD7: z80_SET_bit_reg8(0x04, &emu.cpu.regs.A); break;
+						case 0xD8: z80_SET_bit_reg8(0x08, &emu.cpu.regs.B); break;
+						case 0xD9: z80_SET_bit_reg8(0x08, &emu.cpu.regs.C); break;
+						case 0xDA: z80_SET_bit_reg8(0x08, &emu.cpu.regs.D); break;
+						case 0xDB: z80_SET_bit_reg8(0x08, &emu.cpu.regs.E); break;
+						case 0xDC: z80_SET_bit_reg8(0x08, &emu.cpu.regs.H); break;
+						case 0xDD: z80_SET_bit_reg8(0x08, &emu.cpu.regs.L); break;
+						case 0xDE: z80_SET_bit_reg8(0x08, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0xDF: z80_SET_bit_reg8(0x08, &emu.cpu.regs.A); break;
+						case 0xE0: z80_SET_bit_reg8(0x10, &emu.cpu.regs.B); break;
+						case 0xE1: z80_SET_bit_reg8(0x10, &emu.cpu.regs.C); break;
+						case 0xE2: z80_SET_bit_reg8(0x10, &emu.cpu.regs.D); break;
+						case 0xE3: z80_SET_bit_reg8(0x10, &emu.cpu.regs.E); break;
+						case 0xE4: z80_SET_bit_reg8(0x10, &emu.cpu.regs.H); break;
+						case 0xE5: z80_SET_bit_reg8(0x10, &emu.cpu.regs.L); break;
+						case 0xE6: z80_SET_bit_reg8(0x10, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0xE7: z80_SET_bit_reg8(0x10, &emu.cpu.regs.A); break;
+						case 0xE8: z80_SET_bit_reg8(0x20, &emu.cpu.regs.B); break;
+						case 0xE9: z80_SET_bit_reg8(0x20, &emu.cpu.regs.C); break;
+						case 0xEA: z80_SET_bit_reg8(0x20, &emu.cpu.regs.D); break;
+						case 0xEB: z80_SET_bit_reg8(0x20, &emu.cpu.regs.E); break;
+						case 0xEC: z80_SET_bit_reg8(0x20, &emu.cpu.regs.H); break;
+						case 0xED: z80_SET_bit_reg8(0x20, &emu.cpu.regs.L); break;
+						case 0xEE: z80_SET_bit_reg8(0x20, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0xEF: z80_SET_bit_reg8(0x20, &emu.cpu.regs.A); break;
+						case 0xF0: z80_SET_bit_reg8(0x40, &emu.cpu.regs.B); break;
+						case 0xF1: z80_SET_bit_reg8(0x40, &emu.cpu.regs.C); break;
+						case 0xF2: z80_SET_bit_reg8(0x40, &emu.cpu.regs.D); break;
+						case 0xF3: z80_SET_bit_reg8(0x40, &emu.cpu.regs.E); break;
+						case 0xF4: z80_SET_bit_reg8(0x40, &emu.cpu.regs.H); break;
+						case 0xF5: z80_SET_bit_reg8(0x40, &emu.cpu.regs.L); break;
+						case 0xF6: z80_SET_bit_reg8(0x40, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0xF7: z80_SET_bit_reg8(0x40, &emu.cpu.regs.A); break;
+						case 0xF8: z80_SET_bit_reg8(0x80, &emu.cpu.regs.B); break;
+						case 0xF9: z80_SET_bit_reg8(0x80, &emu.cpu.regs.C); break;
+						case 0xFA: z80_SET_bit_reg8(0x80, &emu.cpu.regs.D); break;
+						case 0xFB: z80_SET_bit_reg8(0x80, &emu.cpu.regs.E); break;
+						case 0xFC: z80_SET_bit_reg8(0x80, &emu.cpu.regs.H); break;
+						case 0xFD: z80_SET_bit_reg8(0x80, &emu.cpu.regs.L); break;
+						case 0xFE: z80_SET_bit_reg8(0x80, &emu.memory.romBank[emu.cpu.regs.HL]); break;
+						case 0xFF: z80_SET_bit_reg8(0x80, &emu.cpu.regs.A); break;
 						default:
 							{
-								sprintf(errorText, "Error in 0xCB instruction at %x!  Opcode number is %x", regs.PC, opcode);
+								sprintf(errorText, "Error in 0xCB instruction at %x!  Opcode number is %x", emu.cpu.regs.PC, opcode);
 								MessageBox(NULL, errorText, "Error!", MB_OK);
 							}
 						break;
@@ -3208,14 +3680,14 @@ void RunEmulation()
 				break;
 				case 0xCC: z80_CALL_condition_immediate(0x02); break;
 				case 0xCD: z80_CALL_immediate(); break;
-				case 0xCE: z80_ADC_A_immediate(); break;
+				case 0xCE: z80_ADC_A_value(); break;
 				case 0xCF: z80_RST(0x08); break;
 				case 0xD0: z80_RET_condition(0x03); break;
-				case 0xD1: z80_POP_reg16(&regs.D, &regs.E); break;
+				case 0xD1: z80_POP_reg16(&emu.cpu.regs.D, &emu.cpu.regs.E); break;
 				case 0xD2: z80_JP_condition_immediate(0x03); break;
 				//case 0xD3:  Maybe doesn't exist?
 				case 0xD4: z80_CALL_condition_immediate(0x03); break;
-				case 0xD5: z80_PUSH_reg16(&regs.D, &regs.E); break;
+				case 0xD5: z80_PUSH_reg16(&emu.cpu.regs.D, &emu.cpu.regs.E); break;
 				case 0xD6: z80_SUB_immediate(); break;
 				case 0xD7: z80_RST(0x10); break;
 				case 0xD8: z80_RET_condition(0x04); break;
@@ -3227,11 +3699,11 @@ void RunEmulation()
 				case 0xDE: z80_SBC_A_immediate(); break;
 				case 0xDF: z80_RST(0x18); break;
 				case 0xE0: z80_LD_0xFF00_immediate_A(); break;
-				case 0xE1: z80_POP_reg16(&regs.H, &regs.L); break;
+				case 0xE1: z80_POP_reg16(&emu.cpu.regs.H, &emu.cpu.regs.L); break;
 				case 0xE2: z80_LD_0xFF00_C_A(); break;
 				//case 0xE3:  Maybe doesn't exist?
 				//case 0xE4:  Maybe doesn't exist?
-				case 0xE5: z80_PUSH_reg16(&regs.H, &regs.L); break;
+				case 0xE5: z80_PUSH_reg16(&emu.cpu.regs.H, &emu.cpu.regs.L); break;
 				case 0xE6: z80_AND_immediate(); break;
 				case 0xE7: z80_RST(0x20); break;
 				case 0xE8: z80_ADD_SP_immediate(); break;
@@ -3243,11 +3715,11 @@ void RunEmulation()
 				case 0xEE: z80_XOR_immediate(); break;
 				case 0xEF: z80_RST(0x28); break;
 				case 0xF0: z80_LD_A_0xFF00_immediate(); break;
-				case 0xF1: z80_POP_reg16(&regs.A, &regs.F); break;
+				case 0xF1: z80_POP_reg16(&emu.cpu.regs.A, &emu.cpu.regs.F); break;
 				case 0xF2: z80_LD_A_0xFF00_C(); break;
 				case 0xF3: z80_DI(); break;
 				//case 0xF4:  Maybe doesn't exist?
-				case 0xF5: z80_PUSH_reg16(&regs.A, &regs.F); break;
+				case 0xF5: z80_PUSH_reg16(&emu.cpu.regs.A, &emu.cpu.regs.F); break;
 				case 0xF6: z80_OR_immediate(); break;
 				case 0xF7: z80_RST(0x30); break;
 				case 0xF8: z80_LD_HL_SP_immediate(); break;
@@ -3259,13 +3731,15 @@ void RunEmulation()
 				case 0xFF: z80_RST(0x38); break;
 				default:
 					{
-						sprintf(errorText, "Error in instruction at %x!  Opcode number is %x.", regs.PC, opcode);
+						sprintf(errorText, "Error in instruction at %x!  Opcode number is %x.", emu.cpu.regs.PC, opcode);
 						MessageBox(NULL, errorText, "Error!", MB_OK);
 					}
 				break;
 			}
-		}
-	}
+		//}
+	//}
+
+	cycles += emu.cpu.gbOpcode.cycles[opcode];
 
 	//----------------------------------------//
 	// Update the counters.                   //
@@ -3343,22 +3817,22 @@ void RunEmulation()
 	//----------------------------------------//
 	if (logging == 1)
 	{
-		sprintf(logText, "PC = 0x%x  SP = 0x%x  AF = 0x%x  BC = 0x%x  DE = 0x%x  HL = 0x%x  Interrupts = %x  Opcode = 0x%x", regs.PC, regs.SP, regs.AF,
-			regs.BC, regs.DE, regs.HL, interruptMasterEnable, opcode);
+		sprintf(logText, "PC = 0x%x  SP = 0x%x  AF = 0x%x  BC = 0x%x  DE = 0x%x  HL = 0x%x  Interrupts = %x  Opcode = 0x%x", emu.cpu.regs.PC, emu.cpu.regs.SP, emu.cpu.regs.AF,
+			emu.cpu.regs.BC, emu.cpu.regs.DE, emu.cpu.regs.HL, interruptMasterEnable, opcode);
 		WriteToLog(logText);
 	}
-	/*	fprintf(handle, "PC = 0x%x  ", regs.PC);
-	fprintf(handle, "SP = 0x%x  ", regs.SP);
-	fprintf(handle, "AF = 0x%x  ", regs.AF);
-	fprintf(handle, "BC = 0x%x  ", regs.BC);
-	fprintf(handle, "DE = 0x%x  ", regs.DE);
-	fprintf(handle, "HL = 0x%x  ", regs.HL);
+	/*	fprintf(handle, "PC = 0x%x  ", emu.cpu.regs.PC);
+	fprintf(handle, "SP = 0x%x  ", emu.cpu.regs.SP);
+	fprintf(handle, "AF = 0x%x  ", emu.cpu.regs.AF);
+	fprintf(handle, "BC = 0x%x  ", emu.cpu.regs.BC);
+	fprintf(handle, "DE = 0x%x  ", emu.cpu.regs.DE);
+	fprintf(handle, "HL = 0x%x  ", emu.cpu.regs.HL);
 	fprintf(handle, "Interrupts = %x  ", interruptMasterEnable);
 	fprintf(handle, "Opcode = 0x%x ", opcode);
 	fprintf(handle, "\n");*/		
 }
 
-cycleTotal -= cyclesToRun;
+cycleTotal -= GB_CyclesPerFrame;
 
 /*IOregister_LY = 0;
 modeFlag = 2;
@@ -3380,8 +3854,6 @@ FPS++;
 UpdateScreen();
 
 emulationTimer = SDL_GetTicks();
-
-}
 
 }
 
@@ -3750,9 +4222,9 @@ void DrawScanline()
 		borderYBack = scrollY & 7;
 
 		if (BGTileData == 0x8000)
-			tileNumber = memory[BGMapData + tilePosYBack + tilePosXBack];
+			tileNumber = emu.memory.romBank[BGMapData + tilePosYBack + tilePosXBack];
 		else
-			tileNumber = (signed char) memory[BGMapData + tilePosYBack + tilePosXBack];
+			tileNumber = (signed char) emu.memory.romBank[BGMapData + tilePosYBack + tilePosXBack];
 
 		//----------------------------------------//
 		// Make sure the background is enabled    //
@@ -3766,8 +4238,8 @@ void DrawScanline()
 			//----------------------------------------//	
 			while (x < 160)
 			{
-				data1 = memory[BGTileData + (tileNumber << 4) + (borderYBack << 1)];
-				data2 = memory[BGTileData + (tileNumber << 4) + (borderYBack << 1) + 1];
+				data1 = emu.memory.romBank[BGTileData + (tileNumber << 4) + (borderYBack << 1)];
+				data2 = emu.memory.romBank[BGTileData + (tileNumber << 4) + (borderYBack << 1) + 1];
 
 				while (borderXBack > 0)
 				{
@@ -3801,9 +4273,9 @@ void DrawScanline()
 				borderXBack = 128;
 
 				if (BGTileData == 0x8000)
-					tileNumber = memory[BGMapData + tilePosYBack + tilePosXBack];
+					tileNumber = emu.memory.romBank[BGMapData + tilePosYBack + tilePosXBack];
 				else
-					tileNumber = (signed char) memory[BGMapData + tilePosYBack + tilePosXBack];
+					tileNumber = (signed char) emu.memory.romBank[BGMapData + tilePosYBack + tilePosXBack];
 			}
 		}
 		else
@@ -3824,9 +4296,9 @@ void DrawScanline()
 		borderXWin = 128;
 
 		if (BGTileData == 0x8000)
-			tileNumber = memory[WindowMapData + (tilePosYWin << 5) + tilePosXWin];
+			tileNumber = emu.memory.romBank[WindowMapData + (tilePosYWin << 5) + tilePosXWin];
 		else
-			tileNumber = (signed char) memory[WindowMapData + (tilePosYWin << 5) + tilePosXWin];
+			tileNumber = (signed char) emu.memory.romBank[WindowMapData + (tilePosYWin << 5) + tilePosXWin];
 
 		//----------------------------------------//
 		// Make sure the window is enabled        //
@@ -3844,8 +4316,8 @@ void DrawScanline()
 				//----------------------------------------//	
 				while (WinX < 160)
 				{
-					data1 = memory[BGTileData + (tileNumber << 4) + (borderYWin << 1)];
-					data2 = memory[BGTileData + (tileNumber << 4) + (borderYWin << 1) + 1];
+					data1 = emu.memory.romBank[BGTileData + (tileNumber << 4) + (borderYWin << 1)];
+					data2 = emu.memory.romBank[BGTileData + (tileNumber << 4) + (borderYWin << 1) + 1];
 
 					while (borderXWin > 0)
 					{
@@ -3879,9 +4351,9 @@ void DrawScanline()
 					borderXWin = 128;
 
 					if (BGTileData == 0x8000)
-						tileNumber = memory[WindowMapData + (tilePosYWin << 5) + tilePosXWin];
+						tileNumber = emu.memory.romBank[WindowMapData + (tilePosYWin << 5) + tilePosXWin];
 					else
-						tileNumber = (signed char) memory[WindowMapData + (tilePosYWin << 5) + tilePosXWin];
+						tileNumber = (signed char) emu.memory.romBank[WindowMapData + (tilePosYWin << 5) + tilePosXWin];
 				}
 				if (borderYWin == 7)
 					tilePosYWin++;
@@ -3895,27 +4367,27 @@ void DrawScanline()
 		{
 		for (sprites = 39; sprites >= 0; sprites--)
 		{
-			y = memory[0xFE00 + (sprites << 2)] - 16;
+			y = emu.memory.romBank[0xFE00 + (sprites << 2)] - 16;
 			if ((IOregister_LY >= y) && (IOregister_LY < (y + SpriteHeight)))
 			{
-				x = memory[0xFE00 + (sprites << 2) + 1] - 8;
+				x = emu.memory.romBank[0xFE00 + (sprites << 2) + 1] - 8;
 				if (SpriteHeight == 16)
-					tileNumber = (memory[0xFE00 + (sprites << 2) + 2]) & 254;
+					tileNumber = (emu.memory.romBank[0xFE00 + (sprites << 2) + 2]) & 254;
 				else
-					tileNumber = memory[0xFE00 + (sprites << 2) + 2];
+					tileNumber = emu.memory.romBank[0xFE00 + (sprites << 2) + 2];
 				
-				spritePalette = 0xFF48 + ((memory[0xFE00 + (sprites << 2) + 3] & 16) >> 4);
+				spritePalette = 0xFF48 + ((emu.memory.romBank[0xFE00 + (sprites << 2) + 3] & 16) >> 4);
 				
 				// If the Y-Flip bit is on, invert for the tile data index.
-				if (memory[0xFE00 + (sprites << 2) + 3] & 64)
+				if (emu.memory.romBank[0xFE00 + (sprites << 2) + 3] & 64)
 				{
-					data1 = memory[0x8000 + (tileNumber << 4) + (((memory[0xFF44] - y) ^ (SpriteHeight - 1)) << 1)];
-					data2 = memory[0x8000 + (tileNumber << 4) + (((memory[0xFF44] - y) ^ (SpriteHeight - 1)) << 1) + 1];
+					data1 = emu.memory.romBank[0x8000 + (tileNumber << 4) + (((emu.memory.romBank[0xFF44] - y) ^ (SpriteHeight - 1)) << 1)];
+					data2 = emu.memory.romBank[0x8000 + (tileNumber << 4) + (((emu.memory.romBank[0xFF44] - y) ^ (SpriteHeight - 1)) << 1) + 1];
 				}
 				else
 				{
-					data1 = memory[0x8000 + (tileNumber << 4) + ((memory[0xFF44] - y) << 1)];
-					data2 = memory[0x8000 + (tileNumber << 4) + ((memory[0xFF44] - y) << 1) + 1];
+					data1 = emu.memory.romBank[0x8000 + (tileNumber << 4) + ((emu.memory.romBank[0xFF44] - y) << 1)];
+					data2 = emu.memory.romBank[0x8000 + (tileNumber << 4) + ((emu.memory.romBank[0xFF44] - y) << 1) + 1];
 				}
 
 				plotY = IOregister_LY;
@@ -3927,41 +4399,41 @@ void DrawScanline()
 					if ((plotX >= 0) && (plotX < 160))
 					{
 						// If X-Flip bit is on, invert i for the pixel check.
-						if (memory[0xFE00 + (sprites << 2) + 3] & BIT_5)
+						if (emu.memory.romBank[0xFE00 + (sprites << 2) + 3] & BIT_5)
 							i ^= 7;
 
 						// Check the sprite priority.
-						if (memory[0xFE00 + (sprites << 2) + 3] & BIT_7)
+						if (emu.memory.romBank[0xFE00 + (sprites << 2) + 3] & BIT_7)
 						{
 							if(bgDataBuffer[plotX] == 0)
 							{
 								// Determine the color of the pixel.
 								if (((data1 & (0x80 >> i)) != 0) && (data2 & (0x80 >> i)) != 0)
-									screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((memory[spritePalette] & 128) >> 6) + ((memory[spritePalette] & 64) >> 6);
+									screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((emu.memory.romBank[spritePalette] & 128) >> 6) + ((emu.memory.romBank[spritePalette] & 64) >> 6);
 								if (((data1 & (0x80 >> i)) == 0) && (data2 & (0x80 >> i)) != 0)
-									screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((memory[spritePalette] & 32) >> 4) + ((memory[spritePalette] & 16) >> 4);
+									screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((emu.memory.romBank[spritePalette] & 32) >> 4) + ((emu.memory.romBank[spritePalette] & 16) >> 4);
 								if (((data1 & (0x80 >> i)) != 0) && (data2 & (0x80 >> i)) == 0)
-									screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((memory[spritePalette] & 8) >> 2) + ((memory[spritePalette] & 4) >> 2);
+									screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((emu.memory.romBank[spritePalette] & 8) >> 2) + ((emu.memory.romBank[spritePalette] & 4) >> 2);
 								if (((data1 & (0x80 >> i)) == 0) && (data2 & (0x80 >> i)) == 0)
-								{}	//screenBuffer[(plotY * 160) + plotX] = ((memory[spritePalette] & 2)) + ((memory[spritePalette] & 1));
+								{}	//screenBuffer[(plotY * 160) + plotX] = ((emu.memory.romBank[spritePalette] & 2)) + ((emu.memory.romBank[spritePalette] & 1));
 							}
 						}
 						else
 						{
 							// Determine the color of the pixel.
 							if (((data1 & (0x80 >> i)) != 0) && (data2 & (0x80 >> i)) != 0)
-								screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((memory[spritePalette] & 128) >> 6) + ((memory[spritePalette] & 64) >> 6);
+								screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((emu.memory.romBank[spritePalette] & 128) >> 6) + ((emu.memory.romBank[spritePalette] & 64) >> 6);
 							if (((data1 & (0x80 >> i)) == 0) && (data2 & (0x80 >> i)) != 0)
-								screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((memory[spritePalette] & 32) >> 4) + ((memory[spritePalette] & 16) >> 4);
+								screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((emu.memory.romBank[spritePalette] & 32) >> 4) + ((emu.memory.romBank[spritePalette] & 16) >> 4);
 							if (((data1 & (0x80 >> i)) != 0) && (data2 & (0x80 >> i)) == 0)
-								screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((memory[spritePalette] & 8) >> 2) + ((memory[spritePalette] & 4) >> 2);
+								screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((emu.memory.romBank[spritePalette] & 8) >> 2) + ((emu.memory.romBank[spritePalette] & 4) >> 2);
 							if (((data1 & (0x80 >> i)) == 0) && (data2 & (0x80 >> i)) == 0)
-							{}	//screenBuffer[(plotY * 160) + plotX] = ((memory[spritePalette] & 2)) + ((memory[spritePalette] & 1));
+							{}	//screenBuffer[(plotY * 160) + plotX] = ((emu.memory.romBank[spritePalette] & 2)) + ((emu.memory.romBank[spritePalette] & 1));
 						}
 						
 						// If i was inverted for the pixel check,
 						// return it to its original value.
-						if (memory[0xFE00 + (sprites << 2) + 3] & BIT_5)
+						if (emu.memory.romBank[0xFE00 + (sprites << 2) + 3] & BIT_5)
 							i ^= 7;
 					}
 				}

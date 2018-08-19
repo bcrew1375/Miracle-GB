@@ -18,7 +18,7 @@ MSG Msg;
 //----------------------------------------//
 
 extern void CloseSDL();
-extern void CPUReset();
+extern void SystemReset();
 extern int  InitializeSDL();
 extern int  LoadRomFile(char filename[]);
 extern FILE *OpenLogFile();
@@ -26,9 +26,7 @@ extern int  OpenSDLWindow();
 extern void ResizeScreen();
 extern void RunEmulation();
 extern void ClearGBMemory();
-extern void UpdateDebugger();
-extern void ShowDebugger();
-extern void SetupDebugger();
+extern int EmulationInitialize(unsigned char *fileBuffer, unsigned int fileSize);
 //----------------------------------------//
 
 //----------------------------------------//
@@ -38,6 +36,7 @@ extern void SetupDebugger();
 extern SDL_Window window;
 extern unsigned int screenHeight;
 extern unsigned int screenWidth;
+extern unsigned int maxFileSize;
 //extern unsigned int screenSizeMultiplier;
 //----------------------------------------//
 
@@ -45,20 +44,15 @@ extern unsigned int screenWidth;
 // Miscellaneous variables.               //
 //----------------------------------------//
 
+HANDLE hRomFile;
 char szFileName[MAX_PATH] = "";
+unsigned char *romFileBuffer;
 
+PLARGE_INTEGER hRomFileSize = NULL;
 unsigned int CPURunning = 0;
 unsigned int FPSLimit = 1;
 unsigned int logging = 0;
-//----------------------------------------//
-
-//----------------------------------------//
-// Miscellaneous pointers.                //
-//----------------------------------------//
-
-unsigned char *bootBuffer;
-unsigned char *romBuffer;
-unsigned char *memory;
+unsigned int emulationInitialized = 0;
 //----------------------------------------//
 
 //----------------------------------------//
@@ -71,16 +65,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	case WM_CREATE:
 		{
 			//----------------------------------------//
-			// Make sure we can allocate enough memory//
-			// for the largest Gameboy ROM.           //
-			//----------------------------------------//
-			if ((!(romBuffer = (unsigned char *)(malloc(0x200000)))) || (!(bootBuffer = (unsigned char *)(malloc(0x100)))) || (!(memory = (unsigned char *)(malloc(0x10000)))))
-			{
-				MessageBox(hWnd, "Could not allocate memory for buffer!", "Error!", MB_OK);
-				DestroyWindow(hWnd);
-				exit(0);
-			}
-			//----------------------------------------//
 			// In the case SDL could not be started,  //
 			// complain and then exit.                //
 			//----------------------------------------//
@@ -90,18 +74,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				DestroyWindow(hWnd);
 				exit(0);
 			}
-			//----------------------------------------//
-			// Clear Gameboy Memory					  //
-			//----------------------------------------//
-			ClearGBMemory();
-			//----------------------------------------//
-			// Reset the Gameboy CPU				  //
-			//----------------------------------------//
-			CPUReset();
-			//----------------------------------------//
-			// Setup the debugger					  //
-			//----------------------------------------//
-			SetupDebugger();
 		}
 	break;
 	case WM_CLOSE:
@@ -136,21 +108,63 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 				if(GetOpenFileName(&ofn))
 				{
-					switch(LoadRomFile(szFileName))
+					hRomFile = CreateFile(szFileName, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
+					if (!hRomFile)
+						MessageBox(hWnd, "Can't open file!", "Error!", MB_OK);
+					else
+					{
+						if (!GetFileSizeEx(hRomFile, &hRomFileSize))
+						{
+							MessageBox(hWnd, "Can't get file size!", "Error", MB_OK);
+						}
+						if (hRomFileSize > maxFileSize)
+						{
+							MessageBox(hWnd, "The file is too large and likely not a valid ROM", "Error!", MB_OK);
+						}
+						else
+						{
+							LPDWORD bytesRead;
+							romFileBuffer = malloc(hRomFileSize);
+							if (!romFileBuffer)
+								MessageBox(hWnd, "Can't allocate ROM buffer!", "Error!", MB_OK);
+							if (!ReadFile(hRomFile, romFileBuffer, hRomFileSize, NULL, NULL))
+								MessageBox(hWnd, "Can't read file!", "Error!", MB_OK);
+							else
+								EmulationInitialize(romFileBuffer, hRomFileSize);
+						}
+						
+						CloseHandle(hRomFile);
+					}
+
+					//fileBuffer = LoadRomFile(szFileName, GetFileSizeEx(szFileName, &fileSize));
+					/*switch(fileBuffer)
 					{
 					case -1:
 						{
-							MessageBox(hWnd, "Could not open file in Read-Only Binary mode!", "Error!", MB_OK);
+							MessageBox(hWnd, "Could not open file!", "Error!", MB_OK);
+							fileBuffer = 0;
 						}
 					break;
 					case -2:
 						{
-							MessageBox(hWnd, "Could not read from file!", "Error!", MB_OK);
+							MessageBox(hWnd, "File too large!  Likely not a valid ROM.", "Error!", MB_OK);
+							fileBuffer = 0;
 						}
 					break;
-					}
+					case -3:
+						{
+							MessageBox(hWnd, "Could not allocate RAM for file!", "Error!", MB_OK);
+							fileBuffer = 0;
+						}
+					break;
+					case -4:
+						{
+							MessageBox(hWnd, "Could not read from file!", "Error!", MB_OK);
+							fileBuffer = 0;
+						}
+					break;
+					}*/
 				}
-				CPUReset();
 			}
 		break;
 		case IDM_FILE_EXIT:
@@ -162,13 +176,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		break;
 		case IDM_EMULATE_RUN:
 			{
-				CPURunning = 1;
 				RunEmulation();
 			}
 		break;
 		case IDM_EMULATE_RESET:
 			{
-				CPUReset();
+				SystemReset();
 			}
 		break;
 		case IDM_OPTIONS_USEFPSLIMIT:
@@ -202,7 +215,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		break;
 		case IDM_DEBUG_STARTDEBUGGER:
 			{				
-				ShowDebugger();
+				//ShowDebugger();
 			}
 		break;
 		case IDM_DEBUG_STARTLOGGING:

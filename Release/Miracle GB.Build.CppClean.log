@@ -1,10 +1,20 @@
 c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\vc141.pdb
-c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\z80-cpu.obj
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\gbcpu.obj
 c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\winmain.obj
 c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\sound.obj
 c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\sdlfunctions.obj
 c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\gbmemory.obj
 c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\fileio.obj
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\debugger.obj
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\miracle gb.exe
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\miracle gb.pdb
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\resource.res
 c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\miracle gb.tlog\cl.command.1.tlog
 c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\miracle gb.tlog\cl.read.1.tlog
 c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\miracle gb.tlog\cl.write.1.tlog
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\miracle gb.tlog\link.command.1.tlog
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\miracle gb.tlog\link.read.1.tlog
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\miracle gb.tlog\link.write.1.tlog
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\miracle gb.tlog\rc.command.1.tlog
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\miracle gb.tlog\rc.read.1.tlog
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\release\miracle gb.tlog\rc.write.1.tlog
