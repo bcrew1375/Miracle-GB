@@ -6,4 +6,4 @@ The codebase is currently being rewritten to be more maintainable.
 
 Controls are hard-coded for now:
 
-A button = F   B button = D   Select button = Space   Start button = Enter   D-Pad = Arrow keys
+A button = F  B button = D  Select button = Space Start button = Enter  D-Pad = Arrow keys
