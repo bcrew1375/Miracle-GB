@@ -19,6 +19,7 @@ MSG Msg;
 
 extern void CloseSDL();
 extern void SystemReset();
+extern void HandleSDLEvents();
 extern int  InitializeSDL();
 extern int  LoadRomFile(char filename[]);
 extern FILE *OpenLogFile();
@@ -241,7 +242,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 //----------------------------------------//
 // The main function.  This setups the    //
-// main window.                           //
+// main window and message checking.      //
 //----------------------------------------//
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	LPSTR lpCmdLine, int nCmdShow)
@@ -280,7 +281,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		MB_ICONEXCLAMATION | MB_OK);
 	}
 
-	OpenSDLWindow();
+	if (!OpenSDLWindow())
+		MessageBox(NULL, "SDL Creation Failed!", "Error!",
+		MB_ICONEXCLAMATION | MB_OK);
 
 	ShowWindow(hWnd, nCmdShow);
 	UpdateWindow(hWnd);

@@ -14,6 +14,7 @@ SDL_TimerID timerID;
 SDL_DisplayMode displayMode;
 //----------------------------------------//
 
+void HandleSDLEvents();
 
 //----------------------------------------//
 // External data.                         //
@@ -86,9 +87,6 @@ int InitializeSDL()
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) == -1)
 		return -1;
 
-	/*if (InitializeSound() == -1)
-		return -1;*/
-
 	return 0;
 }
 
@@ -105,7 +103,6 @@ void ResizeScreen()
 	SDL_SetWindowSize(window, screenWidth * screenSizeMultiplier, screenHeight * screenSizeMultiplier);
 }
 
-
 //----------------------------------------//
 // Open the SDL window, set up the palette//
 //----------------------------------------//
@@ -113,10 +110,10 @@ int OpenSDLWindow()
 {
 	window = SDL_CreateWindowFrom(hWnd);//"Miracle GB", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screenWidth * screenSizeMultiplier, screenHeight * screenSizeMultiplier, SDL_WINDOW_OPENGL);
 	if (window == NULL)
-		return -1;
+		return 0;
 	renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
 	if (renderer == NULL)
-		return -1;
+		return 0;
 	SDL_RenderSetLogicalSize(renderer, screenWidth, screenHeight);
 	screen = SDL_CreateRGBSurface(0, screenWidth, screenHeight, 8, 0, 0, 0, 0);
 	// Set up a pointer to the screen
@@ -145,9 +142,8 @@ int OpenSDLWindow()
 
 	SDL_SetPaletteColors(screen->format->palette, colors, 0, 4);
 
-	return 0;
+	return -1;
 }
-
 
 //----------------------------------------//
 // Close down all SDL functions.          //
@@ -157,15 +153,13 @@ void CloseSDL()
 	SDL_Quit();
 }
 
-
 //----------------------------------------//
 // Update the SDL event queue.            //
 //----------------------------------------//
-void CheckSDLEvents()
+void HandleSDLEvents()
 {
 	SDL_PumpEvents();
 }
-
 
 //----------------------------------------//
 // This function draws the actual screen  //
@@ -180,7 +174,7 @@ void UpdateScreen()
 	plotRectangle.h = 1;//rectangleHeight;
 
 	// Make sure the display is enabled.
-	if (emu.memory.romBank[0xFF40] & 0x80)
+	if (emu.memory.ioRegs[0x40] & 0x80)
 	{
 		for (j = 0; j < 144; j++)
 		{
@@ -218,8 +212,6 @@ void UpdateScreen()
 	SDL_RenderCopy(renderer, texture, 0, 0);
 	SDL_DestroyTexture(texture);
 	SDL_RenderPresent(renderer);
-
-	CheckSDLEvents();
 }
 
 

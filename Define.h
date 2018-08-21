@@ -65,14 +65,6 @@ F - ROM + MBC3 + TIMER + BATT	FF - Hudson HuC - 1
 #define FLAG_C_OFF  0xEF
 
 //----------------------------------------//
-// Define cycle counters.                 //
-//----------------------------------------//
-#define DIVIDER_INTERVAL           64
-#define SOUND_LENGTH_INTERVAL      4096
-#define SOUND_SWEEP_INTERVAL       8192
-#define VERTICAL_RETRACE_INTERVAL  114
-
-//----------------------------------------//
 // Define flags (contents of register F)  //
 //----------------------------------------//
 #define FLAG_Z ((emu.cpu.regs.AF & 0x80) >> 7)
@@ -84,70 +76,79 @@ F - ROM + MBC3 + TIMER + BATT	FF - Hudson HuC - 1
 // Define the number of clock cycles to   //
 // run per 1/60th of a second.            //
 //----------------------------------------//
-#define GB_CyclesPerFrame 70221
+#define GB_CyclesPerFrame 70224
+#define GB_CyclesSTAT	  456
 
 //----------------------------------------//
 // Bit definitions.                       //
 //----------------------------------------//
-#define BIT_0 0x01
-#define BIT_1 0x02
-#define BIT_2 0x04
-#define BIT_3 0x08
-#define BIT_4 0x10
-#define BIT_5 0x20
-#define BIT_6 0x40
-#define BIT_7 0x80
-#define BIT_8 0x100
-#define BIT_9 0x200
-#define BIT_10 0x400
-#define BIT_11 0x800
-#define BIT_12 0x1000
-#define BIT_13 0x2000
-#define BIT_14 0x4000
-#define BIT_15 0x8000
+#define BIT_0		0x01
+#define BIT_1		0x02
+#define BIT_2		0x04
+#define BIT_3		0x08
+#define BIT_4		0x10
+#define BIT_5		0x20
+#define BIT_6		0x40
+#define BIT_7		0x80
+#define BIT_8		0x100
+#define BIT_9		0x200
+#define BIT_10		0x400
+#define BIT_11		0x800
+#define BIT_12		0x1000
+#define BIT_13		0x2000
+#define BIT_14		0x4000
+#define BIT_15		0x8000
+#define BIT_0_OFF	0xFE
+#define BIT_1_OFF	0xFD
+#define BIT_2_OFF	0xFB
+#define BIT_3_OFF	0xF7
+#define BIT_4_OFF	0xEF
+#define BIT_5_OFF	0xDF
+#define BIT_6_OFF	0xBF
+#define BIT_7_OFF	0x7F
 
 //----------------------------------------//
 // Define I/O registers.                  //
 //----------------------------------------//
-#define IOregister_P1                 (emu.io.regs.P1)
-#define IOregister_SB                 (emu.memory.romBank[0xFF01])
-#define IOregister_SC                 (emu.memory.romBank[0xFF02])
-#define IOregister_DIV                (emu.memory.romBank[0xFF04])
-#define IOregister_TIMA               (emu.memory.romBank[0xFF05])
-#define IOregister_TMA                (emu.memory.romBank[0xFF06])
-#define IOregister_TAC                (emu.memory.romBank[0xFF07])
-#define IOregister_IF                 (emu.memory.romBank[0xFF0F])
-#define IOregister_NR10               (emu.memory.romBank[0xFF10])
-#define IOregister_NR11               (emu.memory.romBank[0xFF11])
-#define IOregister_NR12               (emu.memory.romBank[0xFF12])
-#define IOregister_NR13               (emu.memory.romBank[0xFF13])
-#define IOregister_NR14               (emu.memory.romBank[0xFF14])
-#define IOregister_NR21               (emu.memory.romBank[0xFF16])
-#define IOregister_NR22               (emu.memory.romBank[0xFF17])
-#define IOregister_NR23               (emu.memory.romBank[0xFF18])
-#define IOregister_NR24               (emu.memory.romBank[0xFF19])
-#define IOregister_NR30               (emu.memory.romBank[0xFF1A])
-#define IOregister_NR31               (emu.memory.romBank[0xFF1B])
-#define IOregister_NR32               (emu.memory.romBank[0xFF1C])
-#define IOregister_NR33               (emu.memory.romBank[0xFF1D])
-#define IOregister_NR34               (emu.memory.romBank[0xFF1E])
-#define IOregister_NR41               (emu.memory.romBank[0xFF20])
-#define IOregister_NR42               (emu.memory.romBank[0xFF21])
-#define IOregister_NR43               (emu.memory.romBank[0xFF22])
-#define IOregister_NR44               (emu.memory.romBank[0xFF23])
-#define IOregister_NR50               (emu.memory.romBank[0xFF24])
-#define IOregister_NR51               (emu.memory.romBank[0xFF25])
-#define IOregister_NR52               (emu.memory.romBank[0xFF26])
-#define IOregister_LCDC               (emu.memory.romBank[0xFF40])
-#define IOregister_STAT               (emu.memory.romBank[0xFF41])
-#define IOregister_SCY                (emu.memory.romBank[0xFF42])
-#define IOregister_SCX                (emu.memory.romBank[0xFF43])
-#define IOregister_LY                 (emu.memory.romBank[0xFF44])
-#define IOregister_LYC                (emu.memory.romBank[0xFF45])
-#define IOregister_DMA                (emu.memory.romBank[0xFF46])
-#define IOregister_BGP                (emu.memory.romBank[0xFF47])
-#define IOregister_OBP0               (emu.memory.romBank[0xFF48])
-#define IOregister_OBP1               (emu.memory.romBank[0xFF49])
-#define IOregister_WY                 (emu.memory.romBank[0xFF4A])
-#define IOregister_WX                 (emu.memory.romBank[0xFF4B])
-#define IOregister_IE                 (emu.memory.romBank[0xFFFF])
+#define IOregister_P1                 (emu.memory.ioRegs[0x01])
+#define IOregister_SB                 (emu.memory.ioRegs[0x01])
+#define IOregister_SC                 (emu.memory.ioRegs[0x02])
+#define IOregister_DIV                (emu.memory.ioRegs[0x04])
+#define IOregister_TIMA               (emu.memory.ioRegs[0x05])
+#define IOregister_TMA                (emu.memory.ioRegs[0x06])
+#define IOregister_TAC                (emu.memory.ioRegs[0x07])
+#define IOregister_IF                 (emu.memory.ioRegs[0x0F])
+#define IOregister_NR10               (emu.memory.ioRegs[0x10])
+#define IOregister_NR11               (emu.memory.ioRegs[0x11])
+#define IOregister_NR12               (emu.memory.ioRegs[0x12])
+#define IOregister_NR13               (emu.memory.ioRegs[0x13])
+#define IOregister_NR14               (emu.memory.ioRegs[0x14])
+#define IOregister_NR21               (emu.memory.ioRegs[0x16])
+#define IOregister_NR22               (emu.memory.ioRegs[0x17])
+#define IOregister_NR23               (emu.memory.ioRegs[0x18])
+#define IOregister_NR24               (emu.memory.ioRegs[0x19])
+#define IOregister_NR30               (emu.memory.ioRegs[0x1A])
+#define IOregister_NR31               (emu.memory.ioRegs[0x1B])
+#define IOregister_NR32               (emu.memory.ioRegs[0x1C])
+#define IOregister_NR33               (emu.memory.ioRegs[0x1D])
+#define IOregister_NR34               (emu.memory.ioRegs[0x1E])
+#define IOregister_NR41               (emu.memory.ioRegs[0x20])
+#define IOregister_NR42               (emu.memory.ioRegs[0x21])
+#define IOregister_NR43               (emu.memory.ioRegs[0x22])
+#define IOregister_NR44               (emu.memory.ioRegs[0x23])
+#define IOregister_NR50               (emu.memory.ioRegs[0x24])
+#define IOregister_NR51               (emu.memory.ioRegs[0x25])
+#define IOregister_NR52               (emu.memory.ioRegs[0x26])
+#define IOregister_LCDC               (emu.memory.ioRegs[0x40])
+#define IOregister_STAT               (emu.memory.ioRegs[0x41])
+#define IOregister_SCY                (emu.memory.ioRegs[0x42])
+#define IOregister_SCX                (emu.memory.ioRegs[0x43])
+#define IOregister_LY                 (emu.memory.ioRegs[0x44])
+#define IOregister_LYC                (emu.memory.ioRegs[0x45])
+#define IOregister_DMA                (emu.memory.ioRegs[0x46])
+#define IOregister_BGP                (emu.memory.ioRegs[0x47])
+#define IOregister_OBP0               (emu.memory.ioRegs[0x48])
+#define IOregister_OBP1               (emu.memory.ioRegs[0x49])
+#define IOregister_WY                 (emu.memory.ioRegs[0x4A])
+#define IOregister_WX                 (emu.memory.ioRegs[0x4B])
+#define IOregister_IE                 (emu.memory.ioRegs[0xFF])
