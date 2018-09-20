@@ -29,19 +29,16 @@
     <ClCompile Include="..\SDLFunctions.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\GBmemory.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\GBCPU.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\FileIO.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\Debugger.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="WinMain.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\GBemu.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FileIO.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -49,10 +46,7 @@
     <ClInclude Include="resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="GBmemory.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Define.h">
+    <ClInclude Include="..\Define.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\Common.h">

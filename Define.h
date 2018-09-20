@@ -1,9 +1,9 @@
 //----------------------------------------//
 // Define the different types of Gameboys //
 //----------------------------------------//
-#define SYSTEM_GB  0x00
-#define SYSTEM_SGB 0x03
-#define SYSTEM_CGB 0x80
+#define SYSTEM_GB  0x00		// Classic Gameboy
+#define SYSTEM_SGB 0x03		// Super Gameboy
+#define SYSTEM_CGB 0x80		// Gameboy Color
 
 /* Taken from Mark Rawer's site here: http://marc.rawer.de/Gameboy/index.html
 0 - ROM ONLY					12 - ROM + MBC3 + RAM
@@ -59,25 +59,36 @@ F - ROM + MBC3 + TIMER + BATT	FF - Hudson HuC - 1
 #define FLAG_N_ON   0x40
 #define FLAG_H_ON   0x20
 #define FLAG_C_ON   0x10
-#define FLAG_Z_OFF  0x7F
-#define FLAG_N_OFF  0xBF
-#define FLAG_H_OFF  0xDF
-#define FLAG_C_OFF  0xEF
+#define FLAG_Z_OFF  0x70
+#define FLAG_N_OFF  0xB0
+#define FLAG_H_OFF  0xD0
+#define FLAG_C_OFF  0xE0
 
 //----------------------------------------//
 // Define flags (contents of register F)  //
 //----------------------------------------//
-#define FLAG_Z ((emu.cpu.regs.AF & 0x80) >> 7)
-#define FLAG_N ((emu.cpu.regs.AF & 0x40) >> 6)
-#define FLAG_H ((emu.cpu.regs.AF & 0x20) >> 5)
-#define FLAG_C ((emu.cpu.regs.AF & 0x10) >> 4)
+#define FLAG_Z ((emu.cpu.regs.F & 0x80) >> 7)
+#define FLAG_N ((emu.cpu.regs.F & 0x40) >> 6)
+#define FLAG_H ((emu.cpu.regs.F & 0x20) >> 5)
+#define FLAG_C ((emu.cpu.regs.F & 0x10) >> 4)
 
 //----------------------------------------//
 // Define the number of clock cycles to   //
 // run per 1/60th of a second.            //
 //----------------------------------------//
-#define GB_CyclesPerFrame 70224
-#define GB_CyclesSTAT	  456
+#define GB_CyclesPerFrame	70224
+#define GB_CyclesSTAT		456
+#define GB_CyclesDIV		256
+#define GB_CyclesPerSecond	4194304
+
+//----------------------------------------//
+// Cycles for TIMA register's different   //
+// clock settings.                        //
+//----------------------------------------//
+#define GB_CyclesTIMA_4096		1024
+#define GB_CyclesTIMA_16384		256
+#define GB_CyclesTIMA_65536		64
+#define GB_CyclesTIMA_262144	16
 
 //----------------------------------------//
 // Bit definitions.                       //
@@ -110,14 +121,14 @@ F - ROM + MBC3 + TIMER + BATT	FF - Hudson HuC - 1
 //----------------------------------------//
 // Define I/O registers.                  //
 //----------------------------------------//
-#define IOregister_P1                 (emu.memory.ioRegs[0x01])
+#define IOregister_P1                 (emu.memory.ioRegs[0x00])
 #define IOregister_SB                 (emu.memory.ioRegs[0x01])
 #define IOregister_SC                 (emu.memory.ioRegs[0x02])
 #define IOregister_DIV                (emu.memory.ioRegs[0x04])
 #define IOregister_TIMA               (emu.memory.ioRegs[0x05])
 #define IOregister_TMA                (emu.memory.ioRegs[0x06])
 #define IOregister_TAC                (emu.memory.ioRegs[0x07])
-#define IOregister_IF                 (emu.memory.ioRegs[0x0F])
+#define IOregister_IF				  (emu.memory.ioRegs[0x0F])
 #define IOregister_NR10               (emu.memory.ioRegs[0x10])
 #define IOregister_NR11               (emu.memory.ioRegs[0x11])
 #define IOregister_NR12               (emu.memory.ioRegs[0x12])
@@ -151,4 +162,6 @@ F - ROM + MBC3 + TIMER + BATT	FF - Hudson HuC - 1
 #define IOregister_OBP1               (emu.memory.ioRegs[0x49])
 #define IOregister_WY                 (emu.memory.ioRegs[0x4A])
 #define IOregister_WX                 (emu.memory.ioRegs[0x4B])
-#define IOregister_IE                 (emu.memory.ioRegs[0xFF])
+#define IOregister_IE                 (emu.memory.intrpFlags)
+
+#define IntrpMasterEnable			  (emu.state.intrpEnable)

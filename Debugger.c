@@ -738,14 +738,14 @@ void DisassembleLine(unsigned int address, char *data)
 	// the listbox and account for opcodes	  //
 	// that take more than 1 byte.			  //
 	//----------------------------------------//
-	if (opcodeBytes[emu.memory.intRamaddress]] == 3)
+	if (opcodeBytes[emu.memory.internRamaddress]] == 3)
 	{		
-		sprintf(data, "0x%04X: %02X %02X %02X   %s", address, emu.memory.intRamaddress], emu.memory.intRamaddress + 1], emu.memory.intRamaddress + 2], opcodeDescription[emu.memory.intRamaddress]]);
+		sprintf(data, "0x%04X: %02X %02X %02X   %s", address, emu.memory.internRamaddress], emu.memory.internRamaddress + 1], emu.memory.internRamaddress + 2], opcodeDescription[emu.memory.internRamaddress]]);
 		stringPointer = strstr(data, "####");
 
 		if (stringPointer != NULL)
 		{
-			opcodeAddress = (emu.memory.intRamaddress + 2] << 8) + emu.memory.intRamaddress + 1];
+			opcodeAddress = (emu.memory.internRamaddress + 2] << 8) + emu.memory.internRamaddress + 1];
 
 			sprintf(replaceData, "%04X", opcodeAddress);
 
@@ -756,12 +756,12 @@ void DisassembleLine(unsigned int address, char *data)
 		}
 		address += 2;
 	}
-	else if (opcodeBytes[emu.memory.intRamaddress]] == 2)
+	else if (opcodeBytes[emu.memory.internRamaddress]] == 2)
 	{
-		sprintf(data, "0x%04X: %02X %02X      %s", address, emu.memory.intRamaddress], emu.memory.intRamaddress + 1], opcodeDescription[emu.memory.intRamaddress]]);
+		sprintf(data, "0x%04X: %02X %02X      %s", address, emu.memory.internRamaddress], emu.memory.internRamaddress + 1], opcodeDescription[emu.memory.internRamaddress]]);
 		if ((stringPointer = strstr(data, "##")) != NULL)
 		{
-			opcodeAddress = emu.memory.intRamaddress + 1];
+			opcodeAddress = emu.memory.internRamaddress + 1];
 
 			sprintf(replaceData, "%02X", opcodeAddress);
 
@@ -773,7 +773,7 @@ void DisassembleLine(unsigned int address, char *data)
 		//----------------------------------------//
 		else if ((stringPointer = strstr(data, "****")) != NULL)
 		{
-			opcodeAddress = address + (signed char)emu.memory.intRamaddress + 1] + 2;
+			opcodeAddress = address + (signed char)emu.memory.internRamaddress + 1] + 2;
 
 			sprintf(replaceData, "%04X", opcodeAddress);
 
@@ -790,7 +790,7 @@ void DisassembleLine(unsigned int address, char *data)
 			// implementation to add a - or + sign to //
 			// the ADD SP opcode					  //
 			//----------------------------------------//
-			opcodeAddress = emu.memory.intRamaddress + 1];
+			opcodeAddress = emu.memory.internRamaddress + 1];
 
 			if (opcodeAddress > 128)
 			{
@@ -819,14 +819,14 @@ void DisassembleLine(unsigned int address, char *data)
 			*(stringPointer + 1) = replaceData[1];
 			*(stringPointer + 2) = replaceData[2];
 		}
-		else if (emu.memory.intRamaddress] == 0xCB)
+		else if (emu.memory.internRamaddress] == 0xCB)
 		{
-			sprintf(data, "0x%04X: %02X %02X      %s", address, emu.memory.intRamaddress], emu.memory.intRamaddress + 1], opcodeCBDescription[emu.memory.intRamaddress]]);
+			sprintf(data, "0x%04X: %02X %02X      %s", address, emu.memory.internRamaddress], emu.memory.internRamaddress + 1], opcodeCBDescription[emu.memory.internRamaddress]]);
 		}
 		address++;
 	}
 	else
 	{
-		sprintf(data, "0x%04X: %02X         %s", address, emu.memory.intRamaddress], opcodeDescription[emu.memory.intRamaddress]]);
+		sprintf(data, "0x%04X: %02X         %s", address, emu.memory.internRamaddress], opcodeDescription[emu.memory.internRamaddress]]);
 	}
 }*/

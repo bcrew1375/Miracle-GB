@@ -91,6 +91,8 @@
       <PreprocessorDefinitions>WIN32;_CRT_SECURE_NO_WARNINGS;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>C:\Users\Benjamin\Desktop\Software Dev\SDL2\include</AdditionalIncludeDirectories>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -117,13 +119,14 @@
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
-      <Optimization>MaxSpeed</Optimization>
+      <Optimization>Full</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_CRT_SECURE_NO_WARNINGS;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>C:\Users\Benjamin\Desktop\Software Dev\SDL2\include</AdditionalIncludeDirectories>
+      <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -159,16 +162,14 @@
   <ItemGroup>
     <ClCompile Include="..\Debugger.c" />
     <ClCompile Include="..\FileIO.c" />
-    <ClCompile Include="..\GBCPU.c" />
-    <ClCompile Include="..\GBmemory.c" />
+    <ClCompile Include="..\GBemu.c" />
     <ClCompile Include="..\SDLFunctions.c" />
     <ClCompile Include="..\Sound.c" />
     <ClCompile Include="WinMain.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Common.h" />
-    <ClInclude Include="Define.h" />
-    <ClInclude Include="GBmemory.h" />
+    <ClInclude Include="..\Define.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
