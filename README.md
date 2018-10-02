@@ -6,8 +6,8 @@ such as Donkey Kong and Legend of Zelda: Link's Awakening.  The codebase is curr
 
 Controls are hard-coded for now:
 
-A button = F
-B button = D
-Select button = Space
-Start button = Enter
+A button = F  
+B button = D  
+Select button = Space  
+Start button = Enter  
 D-Pad = Arrow keys
