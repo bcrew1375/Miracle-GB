@@ -11,3 +11,10 @@ B button = D
 Select button = Space  
 Start button = Enter  
 D-Pad = Arrow keys
+
+Some images of the emulator:
+
+![](https://github.com/bcrew1375/Miracle-GB/blob/assets/Pic1.jpg?raw=true)
+![](https://github.com/bcrew1375/Miracle-GB/blob/assets/Pic2.jpg?raw=true)
+![](https://github.com/bcrew1375/Miracle-GB/blob/assets/Pic3.jpg?raw=true)
+![](https://github.com/bcrew1375/Miracle-GB/blob/assets/Pic4.jpg?raw=true)
