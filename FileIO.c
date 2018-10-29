@@ -22,7 +22,7 @@ unsigned int bootRomPresent;
 // Variables: filename is a string holding//
 // the ROM file to be opened.             //
 //----------------------------------------//
-unsigned char* LoadRomFile(char filename[])
+unsigned char * LoadRomFile(char filename[], unsigned long int *bytesRead)
 {
 	//----------------------------------------//
 	// If bootRom is present, load it into    //
@@ -51,7 +51,7 @@ unsigned char* LoadRomFile(char filename[])
 	//----------------------------------------//
 	// Read up to the max size of a GB ROM.   //
 	//----------------------------------------//
-	bytesRead = fread(romBuffer, 1, 0x1000000, romHandle);
+	*bytesRead = fread(romBuffer, 1, 0x1000000, romHandle);
 
 	//----------------------------------------//
 	// Close the file.                        //

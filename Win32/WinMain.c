@@ -20,7 +20,7 @@ extern void CloseSDL();
 extern void SystemReset();
 extern void HandleSDLEvents();
 extern int  InitializeSDL();
-unsigned char* LoadRomFile(char filename[]);
+unsigned char* LoadRomFile(char filename[], unsigned long int *fileSize);
 FILE *OpenLogFile();
 extern void AddFPSTimer();
 extern void RemoveFPSTimer();
@@ -28,7 +28,7 @@ extern int  OpenSDLWindow();
 extern void ResizeScreen();
 extern void RunEmulation();
 extern void ClearGBMemory();
-extern int EmulationInitialize(unsigned char *fileBuffer, unsigned int fileSize);
+extern int EmulationInitialize(unsigned char *fileBuffer, unsigned long int fileSize);
 //----------------------------------------//
 
 //----------------------------------------//
@@ -66,8 +66,7 @@ void OpcodeError(char *errorText)
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	unsigned char *romFileBuffer = 0;
-	LARGE_INTEGER hRomFileSize = { 0 };
-	PLARGE_INTEGER hRomFileSizeP = &hRomFileSize;
+	unsigned long int fileSize = 0;
 
 	switch(msg)
 	{
@@ -117,12 +116,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 				if(GetOpenFileName(&ofn))
 				{
-					romFileBuffer = LoadRomFile(szFileName);
+					romFileBuffer = LoadRomFile(szFileName, &fileSize);
 					if (!romFileBuffer)
 						MessageBox(hWnd, "Error opening ROM file!", "Error!", MB_OK);
 					else
 					{
-						EmulationInitialize(romFileBuffer, 0x1000000);
+						EmulationInitialize(romFileBuffer, fileSize);
 						if (FPSLimit == 1)
 							AddFPSTimer();
 						RunEmulation();

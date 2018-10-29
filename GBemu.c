@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <conio.h>
 #include <sdl.h>
 #include <windows.h>
@@ -24,10 +25,11 @@ struct Emulation
 
 	struct Cartridge
 	{
-		int systemType;
-		int mbcType;
+		unsigned char *dataBuffer;  // Buffer that will hold the data from the cartridge.
 		unsigned char romBankRegister;  // This will store the currently selected MBC ROM bank.
-		unsigned char dataBuffer[16777216];  // Set a maximum cartridge size at 16 megabytes.
+		unsigned int mbcType;
+		unsigned int numberOfRomBanks;  // Needed to calculate some MBC bank-switching behavior.
+		unsigned int systemType;
 	} cart;
 
 	struct CPU
@@ -54,7 +56,6 @@ struct Emulation
 		unsigned short int internalCounterCycles;  // Cycle counter for DIV and TIMA register.
 		unsigned short int previousInternalCounterCycles;  // Cycle counter for DIV and TIMA register.
 		unsigned short int timaIncCounterCycles;  // A cycle counter for incrementing the TIMA register.
-		unsigned int frameCycles;
 		unsigned int statCycles;  // Cycle counter for STAT register.
 		unsigned char opCycles[0x100];  // Store the number of clock cycles for every instruction
 		unsigned char opCBCycles[0x100];  // Store cycles for CB bit instructions
@@ -64,49 +65,53 @@ struct Emulation
 	{
 		struct Display
 		{
-			unsigned char bgBuffer[256][256];
-		};
+			boolean lcdDelay;  // The LCD will display nothing during the first frame it is enabled.
+			unsigned char tileBuffer[384][8][8];  // A buffer that will hold the tile table converted to 8-bits.
+			unsigned char spriteBuffer[40][40];  // A buffer that will hold sorted sprite information.
+		} display;
 	} io;
 } emu;
 
 // Standard Gameboy opcode clock cycles.
-unsigned char GB_CycleTable[0x100] = { //0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B 0x0C 0x0D 0x0E 0x0F
-								 /*0x00*/  4,  12,   8,   8,   4,   4,   8,   4,  20,   8,   8,   8,   4,   4,   8,   4,
-								 /*0x10*/  0,  12,   8,   8,   4,   4,   8,   4,  12,   8,   8,   8,   4,   4,   8,   4,
-								 /*0x20*/  8,  12,   8,   8,   4,   4,   8,   4,   8,   8,   8,   8,   4,   4,   8,   4,
-								 /*0x30*/  8,  12,   8,   8,  12,  12,  12,   4,   8,   8,   8,   8,   4,   4,   8,   4,
-								 /*0x40*/  4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
-								 /*0x50*/  4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
-								 /*0x60*/  4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
-								 /*0x70*/  8,   8,   8,   8,   8,   8,   0,   8,   4,   4,   4,   4,   4,   4,   8,   4,
-								 /*0x80*/  4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
-								 /*0x90*/  4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
-								 /*0xA0*/  4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
-								 /*0xB0*/  4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
-								 /*0xC0*/  8,  12,  12,  16,  12,  16,   8,  16,   8,  16,  12,   0,  12,  24,   8,  16,
-								 /*0xD0*/  8,  12,  12,   0,  12,  16,   8,  16,   8,  16,  12,   0,  12,   0,   8,  16,    
-								 /*0xE0*/ 12,  12,   8,   0,   0,  16,   8,  16,  16,   4,  16,   0,   0,   0,   8,  16,
-								 /*0xF0*/ 12,  12,   8,   4,   0,  16,   8,  16,  12,   8,  16,   4,   0,   0,   8,  16
+unsigned char GB_CycleTable[0x100] = {
+			//0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B 0x0C 0x0D 0x0E 0x0F
+	/*0x00*/    4,  12,   8,   8,   4,   4,   8,   4,  20,   8,   8,   8,   4,   4,   8,   4,
+	/*0x10*/    0,  12,   8,   8,   4,   4,   8,   4,  12,   8,   8,   8,   4,   4,   8,   4,
+	/*0x20*/    8,  12,   8,   8,   4,   4,   8,   4,   8,   8,   8,   8,   4,   4,   8,   4,
+	/*0x30*/    8,  12,   8,   8,  12,  12,  12,   4,   8,   8,   8,   8,   4,   4,   8,   4,
+	/*0x40*/    4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
+	/*0x50*/    4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
+	/*0x60*/    4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
+	/*0x70*/    8,   8,   8,   8,   8,   8,   0,   8,   4,   4,   4,   4,   4,   4,   8,   4,
+	/*0x80*/    4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
+	/*0x90*/    4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
+	/*0xA0*/    4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
+	/*0xB0*/    4,   4,   4,   4,   4,   4,   8,   4,   4,   4,   4,   4,   4,   4,   8,   4,
+	/*0xC0*/    8,  12,  12,  16,  12,  16,   8,  16,   8,  16,  12,   0,  12,  24,   8,  16,
+	/*0xD0*/    8,  12,  12,   0,  12,  16,   8,  16,   8,  16,  12,   0,  12,   0,   8,  16,
+	/*0xE0*/   12,  12,   8,   0,   0,  16,   8,  16,  16,   4,  16,   0,   0,   0,   8,  16,
+	/*0xF0*/   12,  12,   8,   4,   0,  16,   8,  16,  12,   8,  16,   4,   0,   0,   8,  16
 };
 
 // Gameboy bit operation clock cycles
-unsigned char GB_CBCycleTable[0x100] = {//0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B 0x0C 0x0D 0x0E 0x0F
-								 /*0x00*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
-								 /*0x10*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
-								 /*0x20*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
-								 /*0x30*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
-								 /*0x40*/    8,   8,   8,   8,   8,   8,  12,   8,   8,   8,   8,   8,   8,   8,  12,   8,
-								 /*0x50*/    8,   8,   8,   8,   8,   8,  12,   8,   8,   8,   8,   8,   8,   8,  12,   8,
-								 /*0x60*/    8,   8,   8,   8,   8,   8,  12,   8,   8,   8,   8,   8,   8,   8,  12,   8,
-								 /*0x70*/    8,   8,   8,   8,   8,   8,  12,   8,   8,   8,   8,   8,   8,   8,  12,   8,
-								 /*0x80*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
-								 /*0x90*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
-								 /*0xA0*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
-								 /*0xB0*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
-								 /*0xC0*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
-								 /*0xD0*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
-								 /*0xE0*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
-								 /*0xF0*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8
+unsigned char GB_CBCycleTable[0x100] = {
+			//0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B 0x0C 0x0D 0x0E 0x0F
+	/*0x00*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+	/*0x10*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+	/*0x20*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+	/*0x30*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+	/*0x40*/    8,   8,   8,   8,   8,   8,  12,   8,   8,   8,   8,   8,   8,   8,  12,   8,
+	/*0x50*/    8,   8,   8,   8,   8,   8,  12,   8,   8,   8,   8,   8,   8,   8,  12,   8,
+	/*0x60*/    8,   8,   8,   8,   8,   8,  12,   8,   8,   8,   8,   8,   8,   8,  12,   8,
+	/*0x70*/    8,   8,   8,   8,   8,   8,  12,   8,   8,   8,   8,   8,   8,   8,  12,   8,
+	/*0x80*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+	/*0x90*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+	/*0xA0*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+	/*0xB0*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+	/*0xC0*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+	/*0xD0*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+	/*0xE0*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8,
+	/*0xF0*/    8,   8,   8,   8,   8,   8,  16,   8,   8,   8,   8,   8,   8,   8,  16,   8
 };
 
 //Blank 8-bit table for possible future use
@@ -130,8 +135,6 @@ unsigned char GB_CBCycleTable[0x100] = {//0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x0
 
 unsigned char opcodeDescription[256][32];
 
-unsigned char WYTemp = 0;
-
 // An array that holds the pixel data that will actually be drawn to the screen.
 unsigned char screenData[0x5A00];
 
@@ -149,6 +152,8 @@ unsigned long long int FPS = 0;
 unsigned int SpeedKey = 0;
 unsigned int LCDCInterruptExecuted = 0;
 unsigned int previousPCvalue = 0;
+
+unsigned char WinYPrevious = 0;
 
 SDL_TimerID FPSTimerID;
 
@@ -248,12 +253,13 @@ void z80_XOR_reg8(unsigned char *reg);
 void CheckLYC();
 void OpcodeError(unsigned char *errorText);
 void DrawScanline();
-int EmulationInitialize(unsigned char *fileBuffer, unsigned int fileSize);
+int EmulationInitialize(unsigned char *fileBuffer, unsigned long int fileSize);
 int HandleInterrupts();
 void RunEmulation();
 void UpdateIORegisters();
 void UpdateJoypadIORegister();
 void WriteMemory(unsigned short int address, unsigned char data);
+void FillTileBuffer(unsigned short int tileNumber);
 
 extern void UpdateFPS();
 extern void LimitFPS();
@@ -266,7 +272,7 @@ extern void WriteToLog(unsigned char *writeData);
 // This will check if the read address is readable and return the data from the proper location.
 unsigned char ReadMemory(unsigned short int address)
 {
-	if ((address >= 0x0000) && (address <= 0x3FFF))
+	if (address <= 0x3FFF)
 		return emu.memory.romBank0[address];
 	else if ((address >= 0x4000) && (address <= 0x7FFF))
 		return emu.memory.romBank1[address - 0x4000];
@@ -283,11 +289,22 @@ unsigned char ReadMemory(unsigned short int address)
 	//else if ((address >= 0xFEA0) && (address <= 0xFEFF))  // Restricted memory space.
 	//	return 0xFF;
 	else if ((address >= 0xFF00) && (address <= 0xFF4B))  // Read from an I/O register.
-	{
 		return emu.memory.ioRegs[address - 0xFF00];
+	else if ((address >= 0xFF4C) && (address <= 0xFF7F))  // Restricted memory space.
+	{
+		// Some of these addresses return specific values.  This shouldn't matter as a typical ROM won't try
+		// to read or write these.  This is mainly included for authenticity.
+		if (address == 0xFF4F)
+			return 0xFF;
+		else if (address == 0xFF68)
+			return 0xFF;
+		else if (address == 0xFF6A)
+			return 0xFF;
+		else if (address == 0xFF72)
+			return 0x40;
+		else
+			return 0x00;
 	}
-	//else if ((address >= 0xFF4C) && (address <= 0xFF7F))  // Restricted memory space.
-	//	return 0xFF;
 	else if ((address >= 0xFF80) && (address <= 0xFFFE))
 		return emu.memory.highRam[address - 0xFF80];
 	else if (address == 0xFFFF)
@@ -300,19 +317,20 @@ unsigned char ReadMemory(unsigned short int address)
 void WriteMemory(unsigned short int address, unsigned char data)
 {
 	// Make sure the instruction isn't trying to write to the ROM bank areas.
-	if ((address >= 0x0000) && (address <= 0x7FFF))
+	if (address <= 0x7FFF)
 	{
 		// See if this is a special memory write.
 		if ((address >= 0x2000) && (address <= 0x3FFF))
 			if ((emu.cart.mbcType >= 1) && (emu.cart.mbcType <= 3))
 			{
-				// 0 or ROM banks that are a multiple of 0x20 refer to the next ROM bank (0x20 = 0x21, 0x40 = 0x41).
 				// The low 5 bits of the 7-bit ROM bank are selected here.
-//				if ((data % 20) == 0)
-//					data |= 1;
+				// 0 or ROM banks that are a multiple of 0x20 refer to the next ROM bank (e.g. 0x20 = 0x21, 0x40 = 0x41).
+				// The actual ROM bank selected is the modulus of written data by the number of ROM banks.
+				if ((data % 0x20) == 0)
+					data = 1;
+				data %= emu.cart.numberOfRomBanks;
 				// This will combine the lower 5 bits of the written data with the ROM bank register.
 				emu.cart.romBankRegister = (emu.cart.romBankRegister & 0xE0) | (data & 0x1F);
-				emu.cart.romBankRegister = data;
 				memcpy(&emu.memory.romBank1[0], &emu.cart.dataBuffer[emu.cart.romBankRegister * 0x4000], 0x4000);
 			}
 		else if ((address >= 0x4000) && (address <= 0x5FFF))
@@ -326,7 +344,13 @@ void WriteMemory(unsigned short int address, unsigned char data)
 	}
 	
 	else if ((address >= 0x8000) && (address <= 0x9FFF))
+	{
 		emu.memory.videoRam[address - 0x8000] = data;
+		// If the write is to the tile data area and a complete tile(16 bytes) has been written,
+		// also write it to an 8-bit tile buffer.  This will reduce the work needed when drawing the screen.
+		if ((address <= 0x97FF) && (((address - 0x8000) & 0xF) == 0xF))
+			FillTileBuffer((address - 0x8000) / 0x10);
+	}
 	else if ((address >= 0xA000) && (address <= 0xBFFF))
 		emu.memory.ramBank[address - 0xA000] = data;
 	else if ((address >= 0xC000) && (address <= 0xDFFF))
@@ -390,14 +414,26 @@ void WriteMemory(unsigned short int address, unsigned char data)
 				// If the LCD is turned off, STAT mode, LY, and triggered display interrupts are all reset, but the LY/LYC compare bit and enabled STAT interrupt are retained.
 				IOregister_STAT &= (BIT_0_OFF & BIT_1_OFF);
 				IOregister_LY = 0;
-				WYTemp = IOregister_WY;
 				//				IOregister_IF &= (BIT_0_OFF & BIT_1_OFF);
 				emu.cycles.statCycles = 0;
+				emu.io.display.lcdDelay = 1;
 			}
 		}
 
 		else if (address == 0xFF41)
 			IOregister_STAT = (BIT_7 | (data & 0x78)) | IOregister_STAT & (BIT_1 | BIT_0);  // Make sure the mode flag is not affected and the 7th bit always returns 1.
+
+		else if (address == 0xFF42)
+			IOregister_SCY = data;
+
+		else if (address == 0xFF43)
+			IOregister_SCX = data;
+
+		else if (address == 0xFF44)
+			IOregister_LY = data;
+
+		else if (address == 0xFF45)
+			IOregister_LYC = data;
 
 		else if (address == 0xFF46)
 		{
@@ -405,6 +441,21 @@ void WriteMemory(unsigned short int address, unsigned char data)
 			for (int i = 0; i < 0xA0; i++)
 				emu.memory.sprite[i] = ReadMemory((IOregister_DMA << 8) + i);  // If data is written to the OAM register, begin an OAM transfer.
 		}
+
+		else if (address == 0xFF47)
+			IOregister_BGP = data;
+
+		else if (address == 0xFF48)
+			IOregister_OBP0 = data;
+
+		else if (address == 0xFF49)
+			IOregister_OBP1 = data;
+
+		else if (address == 0xFF4A)
+			IOregister_WY = data;
+
+		else if (address == 0xFF4B)
+			IOregister_WX = data;
 		else
 			emu.memory.ioRegs[address - 0xFF00] = data;
 	}
@@ -412,461 +463,11 @@ void WriteMemory(unsigned short int address, unsigned char data)
 	//	return;
 	else if ((address >= 0xFF80) && (address <= 0xFFFE))
 		emu.memory.highRam[address - 0xFF80] = data;
+
 	else if (address == 0xFFFF)
-		IOregister_IE = 0xE0 + (data & 0x1F);  // Only the low 5-bits of IE can be written.
+		IOregister_IE = data;
+		//IOregister_IE = 0xE0 | (data & 0x1F);  // Only the low 5-bits of IE can be written.
 }
-	/*if (OAMTransferEnabled == 0)
-	{
-		if ((address >= 0x0000) && (address <= 0x1FFF))
-		{
-			// Writing a value of 0xA enables the RAM bank.
-			// This value should only be evaluated, not written.
-			if (data & 0x0A)
-				ramBankEnable = 1;
-			// Anything else disables the RAM bank.
-			else
-				ramBankEnable = 0;
-		}
-
-		// If using MBC, switch ROM bank.
-		else if ((address >= 0x2000) && (address <= 0x3FFF))
-		{
-			// Again, the data should only be evaluated.
-			if (MBCType > 0)
-			{
-				// If using MBC3, the whole ROM bank number is written here.
-				if (MBCType == 3)
-				{
-					emu.memory.internRamRegister = (data & 127);
-				}
-				// If using MBC5, the lower 8-bits are written to 0x2000-0x2FFF.
-				else if ((MBCType == 5) && (address >= 0x2000) && (address <= 0x2FFF))
-				{
-					emu.memory.internRamRegisterLow = (data & 255);
-				}
-				// If using MBC5, the upper 1-bit is written to 0x3000-0x3FFF.
-				else if ((MBCType == 5) && (address >= 0x3000) && (address <= 0x3FFF))
-				{
-					emu.memory.internRamRegisterHigh = (data & 1);
-				}
-				else
-				{
-					// Combine the written data with the register.
-					emu.memory.internRamRegisterLow = (data & 31);
-				}
-
-				if (MBCType == 1)
-				{
-					emu.memory.internRamRegister = (emu.memory.internRamRegisterHigh << 5) + emu.memory.internRamRegisterLow;
-
-					if (emu.memory.internRamRegister == 0)
-						emu.memory.internRamRegister++;
-				}
-				else if (MBCType == 2)
-				{
-					emu.memory.internRamRegister = emu.memory.internRamRegisterLow;
-				}
-				else if (MBCType == 5)
-				{
-					emu.memory.internRamRegister = (emu.memory.internRamRegisterHigh << 8) + emu.memory.internRamRegisterLow;
-				}
-
-				// Switch 16K ROM bank into 0x4000.
-				memcpy(&emu.memory.internRam[0x4000], &romBuffer[emu.memory.internRamRegister << 14], 0x4000);
-			}
-		}
-
-		else if ((address >= 0x4000) && (address <= 0x5FFF))
-		{
-			// If the ROM uses MBC.
-			if (MBCType > 0)
-			{
-				// If model is set to 16 Mbit/8K mode.
-				if (((MBCType == 1) && (MBC1Model == 0)))
-				{
-					// Combine the written data with the register.
-					emu.memory.internRamRegisterHigh = (data & 0x03);
-
-					emu.memory.internRamRegister = (emu.memory.internRamRegisterHigh << 5) + emu.memory.internRamRegisterLow;
-
-					// With MBC1, Banks 0x20, 0x40, and 0x60 will access 0x21, 0x41, and 0x61 respectively.
-					if ((emu.memory.internRamRegister & 0x1F) == 0)
-						emu.memory.internRamRegister++;
-
-					// Switch in the current ROM bank.
-					memcpy(&emu.memory.internRam[0x4000], &romBuffer[emu.memory.internRamRegister << 14], 0x4000);
-
-					if (currentRamBank != 0)
-					{
-						// Swap out the old RAM bank.
-						memcpy(&ramBank[currentRamBank << 13], &emu.memory.internRam[0xA000], 0x2000);
-
-						// Swap in RAM bank 0x00.
-						memcpy(&emu.memory.internRam[0xA000], &ramBank[0x0000], 0x2000);
-					}
-				}
-
-				// If model is set to 4 Mbit/32K mode.
-				if (((MBCType == 1) && (MBC1Model == 1)) || (MBCType > 1))
-				{
-					if ((MBCType != 3) || ((MBCType == 3) && (data <= 0x03)))
-					{
-						// Swap out the old RAM bank.
-						memcpy(&ramBank[currentRamBank << 13], &emu.memory.internRam[0xA000], 0x2000);
-
-						// Swap in the new RAM bank.
-						memcpy(&emu.memory.internRam[0xA000], &ramBank[data << 13], 0x2000);
-
-						currentRamBank = data;
-					}
-				}
-			}
-		}
-
-		//----------------------------------------//
-		// If using MBC1, select the memory model //
-		// to use.  (0 = 2048K ROM/8K RAM,        //
-		// 1 = 512K ROM/32K RAM).                 //
-		//----------------------------------------//
-		else if ((address >= 0x6000) && (address <= 0x7FFF))
-		{
-			if (MBCType == 1)
-			{
-				MBC1Model = data & 1;
-			}
-		}
-
-		else if ((address >= 0x8000) && (address <= 0x9FFF))
-		{
-			//----------------------------------------//
-			// Probably don't need to check the mode  //
-			// flags since games shouldn't try writing//
-			// here in the first place.               //
-			//----------------------------------------//
-
-			if (modeFlag != 3)
-			{
-				emu.memory.internRamaddress] = data;
-			}
-		}
-
-		else if ((address >= 0xA000) && (address <= 0xBFFF))
-		{
-			if (ramBankEnable == 1)
-			{
-				emu.memory.internRamaddress] = data;
-			}
-		}
-
-		else if ((address >= 0xC000) && (address <= 0xDDFF))
-		{
-			emu.memory.internRamaddress] = data;
-			emu.memory.internRamaddress + 0x2000] = data;
-		}
-
-		else if ((address >= 0xE000) && (address <= 0xFDFF))
-		{
-			emu.memory.internRamaddress] = data;
-			emu.memory.internRamaddress - 0x2000] = data;
-		}
-
-		else if ((address >= 0xFE00) && (address <= 0xFE9F))
-		{
-			//----------------------------------------//
-			// Probably don't need to check the mode  //
-			// flags since games shouldn't try writing//
-			// here in the first place.               //
-			//----------------------------------------//
-
-			if ((modeFlag != 2) && (modeFlag != 3))
-			{
-				emu.memory.internRamaddress] = data;
-			}
-		}
-
-		// This area is restricted.
-		else if ((address >= 0xFEA0) && (address <= 0xFEFF))
-		{
-		}
-
-		// Take care of the joystick register.
-		else if (address == 0xFF00)
-		{
-			// Make sure that only bits 4 and 5 are changed.
-			data &= 48;
-
-			emu.memory.ioRegs[0x00] &= 207;
-			emu.memory.ioRegs[0x00] |= data;
-		}
-
-		else if (address == 0xFF02)
-		{
-			// Don't write to bit 7 since no transfer will be made.
-			data &= 129;
-
-			//emu.memory.ioRegs[0x02] &= 126;
-			emu.memory.ioRegs[0x02] |= data;
-
-			// Since there is not another Gameboy connected, set the received data to 0xFF.
-
-			if ((emu.memory.ioRegs[0x02] & BIT_0) && (emu.memory.ioRegs[0x02] & BIT_7))
-			{
-				emu.memory.ioRegs[0x01] = 0xFF;
-				IOregister_IF |= BIT_3;
-
-				// Turn off bit 7.
-				emu.memory.ioRegs[0x02] &= 127;
-			}
-		}
-
-		else if (address == 0xFF03)
-		{
-		}
-
-		// If the Divider register is written to, reset it.
-		else if (address == 0xFF04)
-		{
-			emu.memory.ioRegs[0x04] = 0;
-
-			dividerCounter = DIVIDER_INTERVAL;
-		}
-
-		else if (address == 0xFF07)
-		{
-			emu.memory.ioRegs[0x07] &= 248;
-			emu.memory.ioRegs[0x07] |= data;
-
-			//----------------------------------------//
-			// Make sure the timer is enabled.        //
-			//----------------------------------------//
-			if (IOregister_TAC & 4)
-			{
-				//----------------------------------------//
-				// Set the timer interval.  I think this  //
-				// area is unnecessarily bulky.           //
-				//----------------------------------------//
-				switch (IOregister_TAC & 3)
-				{
-				case 0x0:
-				{
-					timerInterval = 256; // 4096;
-				}
-				break;
-				case 0x1:
-				{
-					timerInterval = 4; // 262144;
-				}
-				break;
-				case 0x2:
-				{
-					timerInterval = 16; // 65536
-				}
-				break;
-				case 0x3:
-				{
-					timerInterval = 64; // 16384
-				}
-				break;
-				}
-
-				timerCounter = timerInterval;
-			}
-		}
-
-		else if ((address >= 0xFF10) && (address <= 0xFF26))
-		{
-			emu.memory.internRamaddress] = data;
-			if (address == 0xFF10)
-			{
-				emu.memory.ioRegs[0x10] = data & 127;
-			}
-			else if (address == 0xFF11)
-			{
-				emu.memory.ioRegs[0x11] = data;
-			}
-			else if (address == 0xFF12)
-			{
-				emu.memory.ioRegs[0x12] = data;
-			}
-			else if (address == 0xFF13)
-			{
-				emu.memory.ioRegs[0x13] = data;
-			}
-			else if (address == 0xFF14)
-			{
-				emu.memory.ioRegs[0x14] = data;
-			}
-			else if (address == 0xFF15)
-			{
-			}
-			else if (address == 0xFF16)
-			{
-				emu.memory.ioRegs[0x16] = data;
-			}
-			else if (address == 0xFF17)
-			{
-				emu.memory.ioRegs[0x17] = data;
-			}
-			else if (address == 0xFF18)
-			{
-				emu.memory.ioRegs[0x18] = data;
-			}
-			else if (address == 0xFF19)
-			{
-				emu.memory.ioRegs[0x19] = data;
-			}
-			else if (address == 0xFF1A)
-			{
-				emu.memory.ioRegs[0x1A] = data & 128;
-			}
-			else if (address == 0xFF1B)
-			{
-				emu.memory.ioRegs[0x1B] = data;
-			}
-			else if (address == 0xFF1C)
-			{
-				emu.memory.ioRegs[0x1C] = data &= 96;
-			}
-			else if (address == 0xFF1D)
-			{
-				emu.memory.ioRegs[0x1D] = data;
-			}
-			else if (address == 0xFF1E)
-			{
-				emu.memory.ioRegs[0x1E] = data;
-			}
-			else if (address == 0xFF20)
-			{
-				emu.memory.ioRegs[0x20] = data & 63;
-			}
-			else if (address == 0xFF21)
-			{
-				emu.memory.ioRegs[0x21] = data;
-			}
-			else if (address == 0xFF22)
-			{
-				emu.memory.ioRegs[0x22] = data;
-			}
-			else if (address == 0xFF23)
-			{
-				emu.memory.ioRegs[0x23] = data & 192;
-			}
-			else if (address == 0xFF24)
-			{
-				emu.memory.ioRegs[0x24] = data;
-			}
-			else if (address == 0xFF25)
-			{
-				emu.memory.ioRegs[0x25] = data;
-			}
-			else if (address == 0xFF26)
-			{
-				emu.memory.ioRegs[0x26] = data & 143;
-			}
-
-			//aud.WriteRegister(address, data);
-		}
-
-		// If there is a write to the LCD Control Register...
-		else if (address == 0xFF40)
-		{
-			emu.memory.ioRegs[0x40] = data;
-
-			if (!(emu.memory.ioRegs[0x40] & BIT_7))
-			{
-				IOregister_LY = 0;
-				LYCounter = VERTICAL_RETRACE_INTERVAL;
-				modeFlag = 2;
-				retraceCounter = 20;
-				tilePosYWin = 0;
-				WYTemp = IOregister_WY;
-				//emu.memory.ioRegs[0x41]
-				CheckLYC();
-
-				// If the display is disabled, clear the screen.
-				//memcpy(&oldScreenData, &screenData, 0x5A00);
-				memset(&screenData, 0, 0x5A00);
-			}
-			//UpdateScreen();
-		}
-
-		// If the STAT register is written to.
-		else if (address == 0xFF41)
-		{
-			// Make sure only allowed bits are written.
-			data &= 120;
-
-			emu.memory.ioRegs[0x41] |= data;
-
-			// Emulate STAT write during HBLANK or VBLANK bug.
-			if ((modeFlag == 0) || (modeFlag == 1))
-			{
-				emu.memory.ioRegs[0x0F] |= BIT_1;
-			}
-		}
-
-		// If the LY register is written to, reset it.
-		else if (address == 0xFF44)
-		{
-			LYCounter = VERTICAL_RETRACE_INTERVAL;
-
-			IOregister_LY = 0;
-
-			CheckLYC();
-		}
-
-		// If the LY Compare register is written to, see if it is equal to LY.
-		else if (address == 0xFF45)
-		{
-			emu.memory.ioRegs[0x45] = data;
-
-			CheckLYC();
-		}
-
-		else if (address == 0xFF46)
-		{
-			memcpy(&emu.memory.internRam[0xFE00], &emu.memory.internRam(emu.cpu.regs.A << 8)], 0xA0);
-
-			// OAM transfer lasts for approx 168 cycles.
-			//OAMCounter = 168;
-
-			//OAMTransferEnabled = 1;
-		}
-
-		else if (address == 0xFF47)
-		{
-		}
-
-		else if (address == 0xFF48)
-		{
-		}
-
-		else if (address == 0xFF49)
-		{
-		}
-
-		/*	// This area is restricted.  (0xFF50 may be used for turning off boot rom.)
-		else if ((address >= 0xFF4C) && (address <= 0xFF7F))
-		{
-		if (address == 0xFF50)
-		{
-		if (data == 1)
-		{
-		// Overwrite the bootrom in the ROM buffer.
-		memcpy(&emu.memory.internRam[0x0000], &romBuffer[0x0000], 0x100);
-		}
-		}
-		}
-		else
-		{
-		emu.memory.internRamaddress] = data;
-		}
-		}
-		else if ((address >= 0xFF80) && (address <= 0xFFFE))
-		{
-		emu.memory.internRamaddress] = data;
-		}
-		}*/
 
 //----------------------------------------//
 // This instruction will add a given value//
@@ -2626,14 +2227,15 @@ void z80_XOR_reg8(unsigned char *reg)
 
 //----------------------------------------//
 // This function will initialize the GB   //
-// to it's startup state.
+// to its startup state.
 //----------------------------------------//
-int EmulationInitialize(unsigned char *fileBuffer, unsigned int fileSize)
+int EmulationInitialize(unsigned char *fileBuffer, unsigned long int fileSize)
 {
-	//emu.cart.dataBuffer = (unsigned char *)malloc(fileSize);
-	//if (!emu.cart.dataBuffer)
-	//	return -1;
-	memcpy(&emu.cart.dataBuffer[0], &fileBuffer[0], fileSize);  // Copy ROM file data to cartridge buffer 
+	emu.cart.dataBuffer = malloc(fileSize);
+	if (!emu.cart.dataBuffer)
+		return -1;
+	memcpy(&emu.cart.dataBuffer[0x0000000], &fileBuffer[0x0000000], fileSize);  // Copy ROM file data to cartridge buffer 
+	
 	if (emu.cart.dataBuffer[0x0143] == 0x80)
 		emu.cart.systemType = SYSTEM_CGB;
 	if (emu.cart.dataBuffer[0x0146] == 0x03)
@@ -2645,6 +2247,8 @@ int EmulationInitialize(unsigned char *fileBuffer, unsigned int fileSize)
 		return -1;
 
 	emu.cart.mbcType = emu.cart.dataBuffer[0x147];
+
+	emu.cart.numberOfRomBanks = fileSize / 0x4000;  // Calculate the number of 16 KB ROM banks the cartridge has.
 	//----------------------------------------//
 	// Set the CPU and IO register startup    //
 	// values.                                //
@@ -2662,6 +2266,14 @@ int EmulationInitialize(unsigned char *fileBuffer, unsigned int fileSize)
 	emu.cpu.regs.SP = 0xFFFE;
 	emu.cpu.regs.PC = 0x0100;
 
+	// Set memory spaces as value 0xFF by default.
+	memset(&emu.memory.videoRam, 0xFF, 0x2000);
+	memset(&emu.memory.internRam, 0xFF, 0x2000);
+	memset(&emu.memory.sprite, 0xFF, 0xA0);
+	memset(&emu.memory.ioRegs, 0xFF, 0x4C);
+	memset(&emu.memory.highRam, 0xFF, 0x7F);
+
+	// Initial values of I/O registers.  These are important for some ROMS to work correctly.
 	IOregister_P1 =		0xCF;
 	IOregister_SB =		0x00;
 	IOregister_SC =		0x7E;
@@ -2714,15 +2326,14 @@ int EmulationInitialize(unsigned char *fileBuffer, unsigned int fileSize)
 	memcpy(&emu.memory.romBank0[0x0000], &emu.cart.dataBuffer[0x0000], 0x4000);
 	memcpy(&emu.memory.romBank1[0x0000], &emu.cart.dataBuffer[0x4000], 0x4000);
 
-	// Clear the video RAM.
-	memset(&emu.memory.videoRam, 0, 0x2000);
-
 	emu.cycles.statCycles = 0;
 	emu.cycles.internalCounterCycles = 0xABCC;
 
 	emu.state.halted = 0;
 	emu.state.haltInstructionRepeat = 0;
 	emu.state.stopped = 0;
+
+	emu.io.display.lcdDelay = 0;
 
 	sprintf(opcodeDescription[0x00], "NOP");
 	sprintf(opcodeDescription[0x01], "LD BC, $####");
@@ -3960,7 +3571,7 @@ void UpdateSTATRegister()
 			{
 				IOregister_STAT &= BIT_0_OFF;
 				emu.cycles.statCycles -= GB_CyclesSTAT;
-				WYTemp = IOregister_WY;
+				WinYPrevious = IOregister_WY;
 			}
 			else
 			{
@@ -3995,7 +3606,9 @@ void UpdateSTATRegister()
 		// Check if it's the H-Blank period and mode flag 0 should be set.  This mode lasts about 204 clock cycles.  STAT register has already been reset for this.
 		else if ((emu.cycles.statCycles >= 252) && (emu.cycles.statCycles <= 455) && ((IOregister_STAT & (BIT_0 | BIT_1)) != 0))
 		{
-			DrawScanline();
+			if (emu.io.display.lcdDelay == 0)
+				DrawScanline();
+	
 			IOregister_STAT &= (BIT_0_OFF & BIT_1_OFF);
 
 			// If the STAT H-Blank interrupt is selected, set the LCDC interrupt flag.
@@ -4013,13 +3626,14 @@ void UpdateSTATRegister()
 			}
 			if (IOregister_LY == 144)
 			{
+				emu.io.display.lcdDelay = 0;
 				// The first 4 cycles of line 144 are spent in mode 0 on a classic Gameboy.
 				// Some ROMs are dependent on this behavior.
 				if (emu.cycles.statCycles >= 4)
 				{
 					UpdateScreen();
 					FPS++;
-					//LimitFPS();
+					LimitFPS();
 
 					IOregister_STAT &= BIT_1_OFF;
 					IOregister_STAT |= BIT_0;
@@ -4123,301 +3737,242 @@ void UpdateIORegisters()
 		UpdateSTATRegister();	// Handle the STAT and LY registers.
 }
 
+//---------------------------------------------------------------------------------------//
+// This will fill an 8-bit converted tile buffer with tiles from 0x8000 to 0x97FF as     //
+// they are written to video RAM.                                                        //
+//---------------------------------------------------------------------------------------//
+void FillTileBuffer(unsigned short int tileNumber)
+{
+	unsigned char tileLineData1, tileLineData2, tileX, tileY, color;
+
+	for (tileY = 0; tileY < 8; tileY++)
+	{
+		tileLineData1 = emu.memory.videoRam[(tileNumber * 16) + (tileY * 2)];
+		tileLineData2 = emu.memory.videoRam[(tileNumber * 16) + (tileY * 2) + 1];
+
+		for (tileX = 0; tileX < 8; tileX++)
+		{
+			color = tileLineData1 & (128 >> tileX) ? 1 : 0;
+			color += tileLineData2 & (128 >> tileX) ? 2 : 0;
+
+			emu.io.display.tileBuffer[tileNumber][tileX][tileY] = color;
+		}
+	}
+}
+
+//---------------------------------------------------------------------------------//
+// This will convert and sort sprite information to assist in sprite priority.     //
+// The sprites will be sorted according to their x coordinates.                    //
+//---------------------------------------------------------------------------------//
+void SortSprites()
+{
+	unsigned int sprites;
+	unsigned int x;
+
+	for (sprites = 0; sprites < 40; sprites++)
+	{
+//		emu.io.display.spriteBuffer[sprites][]
+		for (x = 0; x < 160; x++)
+		{
+//			if (emu.memory.sprite[sprites * 4] == x)
+		}
+	}
+}
+
 void DrawScanline()
 {
 	//----------------------------------------//
-	// Display arrays.                        //
-	//----------------------------------------//
-	unsigned char bgDataBuffer[160];
-	unsigned char winDataBuffer[160];
-
-	//----------------------------------------//
 	// Display variables.                     //
 	//----------------------------------------//
-	static signed short int tileNumber = 0, sprites = 0;
-	static signed short int x = 0, y = 0, i = 0, j = 0;
-	static signed short int WinX = 0, WinY = 0;
-
-	static unsigned char data1 = 0, data2 = 0, color = 0;
-	static unsigned char scrollX = 0, scrollY = 0;
-	static unsigned char borderXBack = 0, borderYBack = 0;
-	static unsigned char borderXWin = 0, borderYWin = 0;
-	static unsigned char SpriteHeight = 0;
-	static unsigned char tilePosXWin = 0, tilePosYWin = 0;
-
-	static unsigned short int spritePalette = 0;
+	static unsigned char spriteHeight = 0, spritePalette = 0, windowScanline;
 	static unsigned short int plotX = 0, plotY = 0;
-	static unsigned short int tilePosXBack = 0, tilePosYBack = 0;
-	static unsigned short int WindowMapData = 0;
-	static unsigned short int BGTileData = 0;
-	static unsigned short int BGMapData = 0;
+
+	unsigned char bgBuffer[160];
+	unsigned char backgroundX = 0, backgroundY = 0, windowX = 0, windowY = 0;
+	unsigned char tileX = 0, tileY = 0, color = 0, sprites = 0;
+	unsigned short int bgMapData = 0, windowMapData = 0, tileData = 0, tileNumber = 0;
+
+	signed short int spriteX = 0, spriteY = 0, scanlineX;
+
+	// All addresses are relative to memory space 0x8000.
 
 	//----------------------------------------//
-	// Make sure the LCD is active before     //
-	// going any further.                     //
+	// This decides where to get background   //
+	// and window tile patterns from.         //
 	//----------------------------------------//
-	if (IOregister_LCDC & BIT_7)
+	if (IOregister_LCDC & BIT_4)
+		tileData = 0x0000;
+	else
+		tileData = 0x0800;
+
+	//----------------------------------------//
+	// This decides where to get background   //
+	// tile numbers to be displayed.          //
+	//----------------------------------------//
+	if (IOregister_LCDC & BIT_3)
+		bgMapData = 0x1C00;
+	else
+		bgMapData = 0x1800;
+
+	//----------------------------------------//
+	// This decides where to get window       //
+	// tile numbers to be displayed.          //
+	//----------------------------------------//
+	if (IOregister_LCDC & BIT_6)
+		windowMapData = 0x1C00;
+	else
+		windowMapData = 0x1800;
+
+	// The window's scanline is tracked separately to account for the window tile map location not increasing
+	// when the window is disabled.
+	if (IOregister_LY == 0)
 	{
-		// All addresses are relative to memory space 0x8000.
+		memset(&screenData, 0, 0x5A00);
+		windowScanline = 0;
+	}
 
-		//----------------------------------------//
-		// This decides where to get background   //
-		// tile patterns from.                    //
-		//----------------------------------------//
-		if (IOregister_LCDC & BIT_4)
-			BGTileData = 0x0000;
-		else
-			// Technically should be 0x8800, but this
-			// makes addressing simpler.
-			BGTileData = 0x1000;
-
-		//----------------------------------------//
-		// This decides where to get tile numbers //
-		// to be displayed from.                  //
-		//----------------------------------------//
-		if (IOregister_LCDC & BIT_3)
-			BGMapData = 0x1C00;
-		else
-			BGMapData = 0x1800;
-
-		if (IOregister_LCDC & BIT_6)
-			WindowMapData = 0x1C00;
-		else
-			WindowMapData = 0x1800;
-
-		x = 0;
-		y = IOregister_LY;
-
-		scrollX = IOregister_SCX;
-		scrollY = (y + IOregister_SCY);
-
-		tilePosXBack = scrollX >> 3;
-		tilePosYBack = (scrollY >> 3) << 5;
-
-		borderXBack = 1 << (7 - (scrollX & 7));
-		borderYBack = scrollY & 7;
-
-		//----------------------------------------//
-		// Make sure the background is enabled    //
-		// before drawing.                        //
-		//----------------------------------------//
+	// Draw a single scanline.
+	for (scanlineX = 0; scanlineX < 160; scanlineX++)
+	{
+		// If the background and window are enabled.
 		if (IOregister_LCDC & BIT_0)
 		{
-			//----------------------------------------//
-			// Draw the background into the screen    //
-			// buffer.  These are always 8 x 8.       //
-			//----------------------------------------//
-			while (x < 160)
+			// Add and divide on separate lines to make sure the 8-bit values wrap properly.
+			// This is necessary for background scrolling to work properly.
+			backgroundX = (IOregister_SCX + scanlineX);
+			backgroundX /= 8;
+			backgroundY = (IOregister_SCY + IOregister_LY);
+			backgroundY /= 8;
+			tileX = (IOregister_SCX + scanlineX) & 7;
+			tileY = (IOregister_SCY + IOregister_LY) & 7;
+
+			if (tileData == 0x0000)
+				tileNumber = emu.memory.videoRam[bgMapData + (backgroundY * 32) + backgroundX];
+			else
+				tileNumber = 256 + (signed char)emu.memory.videoRam[bgMapData + (backgroundY * 32) + backgroundX];
+
+			color = emu.io.display.tileBuffer[tileNumber][tileX][tileY];
+			// Record the color number to be used for the sprite priority.
+			bgBuffer[scanlineX] = color;
+			
+			if (color == 3)
+				screenData[(IOregister_LY * 160) + scanlineX] = ((IOregister_BGP & BIT_7) >> 6) + ((IOregister_BGP & BIT_6) >> 6);
+			if (color == 2)
+				screenData[(IOregister_LY * 160) + scanlineX] = ((IOregister_BGP & BIT_5) >> 4) + ((IOregister_BGP & BIT_4) >> 4);
+			if (color == 1)
+				screenData[(IOregister_LY * 160) + scanlineX] = ((IOregister_BGP & BIT_3) >> 2) + ((IOregister_BGP & BIT_2) >> 2);
+			if (color == 0)
+				screenData[(IOregister_LY * 160) + scanlineX] = ((IOregister_BGP & BIT_1)) + ((IOregister_BGP & BIT_0));
+
+			// If the window layer is enabled.
+			if (IOregister_LCDC & BIT_5)
 			{
-				if (BGTileData == 0x0000)
-					tileNumber = emu.memory.videoRam[BGMapData + tilePosYBack + tilePosXBack];
-				else
-					tileNumber = (signed char)emu.memory.videoRam[BGMapData + tilePosYBack + tilePosXBack];
-
-				data1 = emu.memory.videoRam[BGTileData + (tileNumber * 16) + (borderYBack * 2)];
-				data2 = emu.memory.videoRam[BGTileData + (tileNumber * 16) + (borderYBack * 2) + 1];
-
-				while (borderXBack > 0)
+				if ((scanlineX >= (IOregister_WX - 7)) && (IOregister_LY >= IOregister_WY))
 				{
-					color = (data1 & borderXBack) ? 1 : 0;
-					color += (data2 & borderXBack) ? 2 : 0;
+					windowX = (scanlineX - (IOregister_WX - 7)) / 8;
+					windowY = windowScanline / 8;
+					tileX = (scanlineX - (IOregister_WX - 7)) & 7;
+					tileY = windowScanline & 7;
+
+					if (tileData == 0x0000)
+						tileNumber = emu.memory.videoRam[windowMapData + (windowY * 32) + windowX];
+					else
+						tileNumber = 256 + (signed char)emu.memory.videoRam[windowMapData + (windowY * 32) + windowX];
+
+					color = emu.io.display.tileBuffer[tileNumber][tileX][tileY];
+					// Record the color number to be used for the sprite priority.
+					bgBuffer[scanlineX] = color;
 
 					if (color == 3)
-						screenData[(y * 160) + x] = ((IOregister_BGP & BIT_7) >> 6) + ((IOregister_BGP & BIT_6) >> 6);
+						screenData[(IOregister_LY * 160) + scanlineX] = ((IOregister_BGP & BIT_7) >> 6) + ((IOregister_BGP & BIT_6) >> 6);
 					if (color == 2)
-						screenData[(y * 160) + x] = ((IOregister_BGP & BIT_5) >> 4) + ((IOregister_BGP & BIT_4) >> 4);
+						screenData[(IOregister_LY * 160) + scanlineX] = ((IOregister_BGP & BIT_5) >> 4) + ((IOregister_BGP & BIT_4) >> 4);
 					if (color == 1)
-						screenData[(y * 160) + x] = ((IOregister_BGP & BIT_3) >> 2) + ((IOregister_BGP & BIT_2) >> 2);
+						screenData[(IOregister_LY * 160) + scanlineX] = ((IOregister_BGP & BIT_3) >> 2) + ((IOregister_BGP & BIT_2) >> 2);
 					if (color == 0)
-						screenData[(y * 160) + x] = ((IOregister_BGP & BIT_1)) + ((IOregister_BGP & BIT_0));
-
-					bgDataBuffer[x] = color;
-					
-					x++;
-
-					if (x == 160)
-						break;
-
-					borderXBack >>= 1;
+						screenData[(IOregister_LY * 160) + scanlineX] = ((IOregister_BGP & BIT_1)) + ((IOregister_BGP & BIT_0));
 				}
-				
-				tilePosXBack++;
-
-				if (tilePosXBack == 32)
-					tilePosXBack = 0;
-
-				borderXBack = 128;
 			}
 		}
+	}
+	// If the window was enabled this scanline.
+	if ((IOregister_LCDC & BIT_5) && (IOregister_WX <= 166))
+		windowScanline++;
+
+	//----------------------------------------//
+	// Draw sprites into the screen buffer.   //
+	//----------------------------------------//
+	if (IOregister_LCDC & BIT_1)
+	{
+		//----------------------------------------//
+		// This decides the height of the tile    //
+		// being drawn.                           //
+		//----------------------------------------//
+		if (IOregister_LCDC & BIT_2)
+			spriteHeight = 16;
 		else
+			spriteHeight = 8;
+
+		for (sprites = 0; sprites < 40; sprites++)
 		{
-			memset(&bgDataBuffer, 0, 160);
-			memset(&screenData[IOregister_LY * 160], 0, 160);
-		}	
-
-		//----------------------------------------//
-		// Make sure the window is enabled        //
-		// before drawing.                        //
-		//----------------------------------------//
-		if (IOregister_LCDC & BIT_5)
-		{
-			WinX = IOregister_WX - 7;
-			if (WinX < 0)
-				WinX = 0;
-
-			WinY = IOregister_LY;
-
-			tilePosXWin = 0;
-			if (IOregister_LY >= IOregister_WY)
-				tilePosYWin = (IOregister_LY - IOregister_WY) >> 3;
-
-			borderXWin = 128;
-
-			if (BGTileData == 0x0000)
-				tileNumber = emu.memory.videoRam[WindowMapData + (tilePosYWin * 32) + tilePosXWin];
-			else
-				tileNumber = (signed char)emu.memory.videoRam[WindowMapData + (tilePosYWin * 32) + tilePosXWin];
-
-			if ((WinY >= WYTemp) && (WinX < 160) && (WinX >= 0))
+			spriteY = emu.memory.sprite[sprites * 4] - 16;
+			// If the current scanline is within the range of the sprite's position.
+			if ((IOregister_LY >= spriteY) && ((spriteY + 16) > 0) && (IOregister_LY < (spriteY + spriteHeight)))
 			{
-				borderYWin = (WinY - WYTemp) & 7;
+				spriteX = emu.memory.sprite[(sprites * 4) + 1] - 8;
+				if (emu.memory.sprite[(sprites * 4) + 3] & BIT_4)
+					spritePalette = IOregister_OBP1;
+				else
+					spritePalette = IOregister_OBP0;
 
-				//----------------------------------------//
-				// Draw the window into the screen        //
-				// buffer.  These are always 8 x 8.       //
-				//----------------------------------------//	
-				while (WinX < 160)
+				// If the Y-Flip bit is on, invert for the tile data index.
+				if (emu.memory.sprite[(sprites * 4) + 3] & BIT_6)
+					tileY = (((IOregister_LY - spriteY) & (spriteHeight - 1)) ^ (spriteHeight - 1));
+				else
+					tileY = (IOregister_LY - spriteY) & (spriteHeight - 1);
+
+				// If the sprite is past the 8th line, then move to the next tile.
+				if (tileY >= 8)
 				{
-					data1 = emu.memory.videoRam[BGTileData + (tileNumber * 16) + (borderYWin * 2)];
-					data2 = emu.memory.videoRam[BGTileData + (tileNumber * 16) + (borderYWin * 2) + 1];
-
-					while (borderXWin > 0)
-					{
-						color = (data1 & borderXWin) ? 1 : 0;
-						color += (data2 & borderXWin) ? 2 : 0;
-
-						if (color == 3)
-							screenData[(WinY * 160) + WinX] = ((IOregister_BGP & BIT_7) >> 6) + ((IOregister_BGP & BIT_6) >> 6);
-						if (color == 2)
-							screenData[(WinY * 160) + WinX] = ((IOregister_BGP & BIT_5) >> 4) + ((IOregister_BGP & BIT_4) >> 4);
-						if (color == 1)
-							screenData[(WinY * 160) + WinX] = ((IOregister_BGP & BIT_3) >> 2) + ((IOregister_BGP & BIT_2) >> 2);
-						if (color == 0)
-							screenData[(WinY * 160) + WinX] = ((IOregister_BGP & BIT_1)) + ((IOregister_BGP & BIT_0));
-
-						bgDataBuffer[WinX] = color;
-
-						WinX++;
-
-						if (WinX == 160)
-							break;
-
-						borderXWin >>= 1;
-					}
-
-					tilePosXWin++;
-
-					if (tilePosXWin == 20)
-						tilePosXWin = 0;
-
-					borderXWin = 128;
-
-					if (BGTileData == 0x0000)
-						tileNumber = emu.memory.videoRam[WindowMapData + (tilePosYWin * 32) + tilePosXWin];
-					else
-						tileNumber = (signed char)emu.memory.videoRam[WindowMapData + (tilePosYWin * 32) + tilePosXWin];
+					tileNumber = (emu.memory.sprite[(sprites * 4) + 2]) + 1;
+					tileY -= 8;
 				}
-				if (borderYWin == 7)
-					tilePosYWin++;
-			}
-		}
-		
-		//----------------------------------------//
-		// Draw sprites into the screen buffer.   //
-		//----------------------------------------//
-		if (IOregister_LCDC & BIT_1)
-		{
-			//----------------------------------------//
-			// This decides the height of the tile    //
-			// being drawn.                           //
-			//----------------------------------------//
-			if (IOregister_LCDC & BIT_2)
-				SpriteHeight = 16;
-			else
-				SpriteHeight = 8;
+				else
+					tileNumber = emu.memory.sprite[(sprites * 4) + 2];
 
-			for (sprites = 39; sprites >= 0; sprites--)
-			{
-				y = emu.memory.sprite[sprites * 4] - 16;
-				if ((IOregister_LY >= y) && (IOregister_LY < (y + SpriteHeight)))
+				for (scanlineX = spriteX; scanlineX < (spriteX + 8); scanlineX++)
 				{
-					x = emu.memory.sprite[(sprites * 4) + 1] - 8;
-					if (SpriteHeight == 16)
-						tileNumber = (emu.memory.sprite[(sprites * 4) + 2]) & BIT_0_OFF;
-					else
-						tileNumber = emu.memory.sprite[(sprites * 4) + 2];
-
-					spritePalette = 0xFF48 + ((emu.memory.sprite[(sprites * 4) + 3] & BIT_4) >> 4);
-
-					// If the Y-Flip bit is on, invert for the tile data index.
-					if (emu.memory.sprite[(sprites * 4) + 3] & BIT_6)
+					if ((scanlineX >= 0) & (scanlineX < 160))
 					{
-						data1 = emu.memory.videoRam[(tileNumber * 16) + (((IOregister_LY - y) ^ (SpriteHeight - 1)) * 2)];
-						data2 = emu.memory.videoRam[(tileNumber * 16) + (((IOregister_LY - y) ^ (SpriteHeight - 1)) * 2) + 1];
-					}
-					else
-					{
-						data1 = emu.memory.videoRam[(tileNumber * 16) + ((IOregister_LY - y) * 2)];
-						data2 = emu.memory.videoRam[(tileNumber * 16) + ((IOregister_LY - y) * 2) + 1];
-					}
+						tileX = (scanlineX - spriteX) & 7;
 
-					plotY = IOregister_LY;
+						// If the X-Flip bit is on, invert for the tile data index.
+						if (emu.memory.sprite[(sprites * 4) + 3] & BIT_5)
+							tileX ^= 7;
 
-					for (i = 0; i < 8; i++)
-					{
-						plotX = x + i;
+						color = emu.io.display.tileBuffer[tileNumber][tileX][tileY];
 
-						if ((plotX >= 0) && (plotX < 160))
+						// Check the sprite priority.
+						if (emu.memory.sprite[(sprites * 4) + 3] & BIT_7)
 						{
-							// If X-Flip bit is on, invert i for the pixel check.
-							if (emu.memory.sprite[(sprites * 4) + 3] & BIT_5)
-								i ^= 7;
-
-							// Check the sprite priority.
-							if (emu.memory.sprite[(sprites * 4) + 3] & BIT_7)
+							if (bgBuffer[scanlineX] == 0)
 							{
-								if (bgDataBuffer[plotX] == 0)
-								{
-									// Determine the color of the pixel.
-									if (((data1 & (0x80 >> i)) != 0) && (data2 & (0x80 >> i)) != 0)
-										screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((ReadMemory(spritePalette) & 128) >> 6) + ((ReadMemory(spritePalette) & 64) >> 6);
-									if (((data1 & (0x80 >> i)) == 0) && (data2 & (0x80 >> i)) != 0)
-										screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((ReadMemory(spritePalette) & 32) >> 4) + ((ReadMemory(spritePalette) & 16) >> 4);
-									if (((data1 & (0x80 >> i)) != 0) && (data2 & (0x80 >> i)) == 0)
-										screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((ReadMemory(spritePalette) & 8) >> 2) + ((ReadMemory(spritePalette) & 4) >> 2);
-									if (((data1 & (0x80 >> i)) == 0) && (data2 & (0x80 >> i)) == 0)
-									{
-									}	//screenBuffer[(plotY * 160) + plotX] = ((emu.memory.internRamspritePalette] & 2)) + ((emu.memory.internRamspritePalette] & 1));
-								}
+								if (color == 3)
+									screenData[(IOregister_LY * 160) + scanlineX] = ((spritePalette & BIT_7) >> 6) + ((spritePalette & BIT_6) >> 6);
+								if (color == 2)
+									screenData[(IOregister_LY * 160) + scanlineX] = ((spritePalette & BIT_5) >> 4) + ((spritePalette & BIT_4) >> 4);
+								if (color == 1)
+									screenData[(IOregister_LY * 160) + scanlineX] = ((spritePalette & BIT_3) >> 2) + ((spritePalette & BIT_2) >> 2);
 							}
-							else
-							{
-								// Determine the color of the pixel.
-								if (((data1 & (0x80 >> i)) != 0) && (data2 & (0x80 >> i)) != 0)
-									screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((ReadMemory(spritePalette) & 128) >> 6) + ((ReadMemory(spritePalette) & 64) >> 6);
-								if (((data1 & (0x80 >> i)) == 0) && (data2 & (0x80 >> i)) != 0)
-									screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((ReadMemory(spritePalette) & 32) >> 4) + ((ReadMemory(spritePalette) & 16) >> 4);
-								if (((data1 & (0x80 >> i)) != 0) && (data2 & (0x80 >> i)) == 0)
-									screenData[((plotY << 7) + (plotY << 5)) + plotX] = ((ReadMemory(spritePalette) & 8) >> 2) + ((ReadMemory(spritePalette) & 4) >> 2);
-								if (((data1 & (0x80 >> i)) == 0) && (data2 & (0x80 >> i)) == 0)
-								{
-								}	//screenBuffer[(plotY * 160) + plotX] = ((emu.memory.internRamspritePalette] & 2)) + ((emu.memory.internRamspritePalette] & 1));
-							}
-
-							// If i was inverted for the pixel check,
-							// return it to its original value.
-							if (emu.memory.sprite[(sprites * 4) + 3] & BIT_5)
-								i ^= 7;
+						}
+						else
+						{
+							if (color == 3)
+								screenData[(IOregister_LY * 160) + scanlineX] = ((spritePalette & BIT_7) >> 6) + ((spritePalette & BIT_6) >> 6);
+							if (color == 2)
+								screenData[(IOregister_LY * 160) + scanlineX] = ((spritePalette & BIT_5) >> 4) + ((spritePalette & BIT_4) >> 4);
+							if (color == 1)
+								screenData[(IOregister_LY * 160) + scanlineX] = ((spritePalette & BIT_3) >> 2) + ((spritePalette & BIT_2) >> 2);
 						}
 					}
 				}
