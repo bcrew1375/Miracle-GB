@@ -2093,8 +2093,9 @@ void z80_SRL_reg8(unsigned char *reg)
 //----------------------------------------//
 void z80_STOP()
 {
-	// Don't allow STOP if interrupts are disabled.
-	//if (emu.state.intrpEnable == 1)
+	// If all interrupts are disabled, the ROM is likely trying to switch the CPU speed for a Gameboy Color.
+	// This is not possible on MGB/GBP/SGB and would lock the CPU on a real system.
+	if (IOregister_IE > 0)
 		emu.state.stopped = 1;
 	// Skip over the extra 0x00
 	emu.cpu.regs.PC++;
@@ -2611,8 +2612,7 @@ void RunEmulation()
 	unsigned char cbOpcode = 0;
 	unsigned char hlMemVal = 0;
 
-	OpenLogFile();
-	// Add a FPS timer.
+	//OpenLogFile();
 
 	// Record previous PC value For logging.
 	unsigned int previousPCvalue = 0;
@@ -2648,12 +2648,12 @@ void RunEmulation()
 		//			sprintf(logText, "%d", IOregister_STAT & 3);
 		//			WriteToLog(logText);
 
-					// Check if the opcode is a corrupted stop.
-		if ((opcode == 0x10) && ReadMemory(emu.cpu.regs.PC) != 0x00)
+		// Check if the opcode is a corrupted stop.
+		/*if ((opcode == 0x10) && ReadMemory(emu.cpu.regs.PC) != 0x00)
 		{
 			sprintf(logText, "Corrupted stop at 0x%04x.  Previous PC values are 0x%04x : 0x%04x : 0x%04x : 0x%04x : 0x%04x : 0x%04x.  Previous opcodes are 0x%02x : 0x%02x : 0x%02x", emu.cpu.regs.PC, previousPCvalue, previousPCvalue2, previousPCvalue3, previousPCvalue4, previousPCvalue5, previousPCvalue6, previousOpcode, previousOpcode2, previousOpcode3);
 			MessageBox(NULL, logText, "Error!", MB_OK);
-		}
+		}*/
 
 		// Do some boundary checking.
 		if (((emu.cpu.regs.PC >= 0x8000) && (emu.cpu.regs.PC <= 0x9FFF)) || ((emu.cpu.regs.PC >= 0xFF4C) && (emu.cpu.regs.PC <= 0xFF7F)) || ((emu.cpu.regs.PC >= 0xFEA0) && (emu.cpu.regs.PC <= 0xFEFF)))
@@ -3571,7 +3571,6 @@ void UpdateSTATRegister()
 			{
 				IOregister_STAT &= BIT_0_OFF;
 				emu.cycles.statCycles -= GB_CyclesSTAT;
-				WinYPrevious = IOregister_WY;
 			}
 			else
 			{
@@ -3594,21 +3593,25 @@ void UpdateSTATRegister()
 		// Check if OAM is being accessed and mode flag 2 should be set.  Mode 2 lasts about 80 clock cycles.
 		if ((emu.cycles.statCycles >= 0) && (emu.cycles.statCycles <= 79) && ((IOregister_STAT & (BIT_0 | BIT_1)) != 2))
 		{
+			if (emu.io.display.lcdDelay == 0)
+				DrawScanline();
+
 			IOregister_STAT &= BIT_0_OFF;
 			IOregister_STAT |= BIT_1;
 
 			if (IOregister_STAT & BIT_5)
 				IOregister_IF |= BIT_1;
 		}
-		// Check if OAM and video RAM is being accessed and mode flag 3 should be set.  This mode lasts about 172 clock cycles.
-		else if ((emu.cycles.statCycles >= 80) && (emu.cycles.statCycles <= 251) && ((IOregister_STAT & (BIT_0 | BIT_1)) != 3))
+		// Check if OAM and video RAM is being accessed and mode flag 3 should be set.
+		// This mode lasts about 172 clock cycles.
+		else if ((emu.cycles.statCycles >= 80) && (emu.cycles.statCycles <= 251) &&
+			((IOregister_STAT & (BIT_0 | BIT_1)) != 3))
 			IOregister_STAT |= (BIT_0 | BIT_1);
-		// Check if it's the H-Blank period and mode flag 0 should be set.  This mode lasts about 204 clock cycles.  STAT register has already been reset for this.
-		else if ((emu.cycles.statCycles >= 252) && (emu.cycles.statCycles <= 455) && ((IOregister_STAT & (BIT_0 | BIT_1)) != 0))
-		{
-			if (emu.io.display.lcdDelay == 0)
-				DrawScanline();
-	
+		// Check if it's the H-Blank period and mode flag 0 should be set.
+		// This mode lasts about 204 clock cycles.
+		else if ((emu.cycles.statCycles >= 252) && (emu.cycles.statCycles <= 455) &&
+			((IOregister_STAT & (BIT_0 | BIT_1)) != 0))
+		{	
 			IOregister_STAT &= (BIT_0_OFF & BIT_1_OFF);
 
 			// If the STAT H-Blank interrupt is selected, set the LCDC interrupt flag.
@@ -3645,9 +3648,9 @@ void UpdateSTATRegister()
 					IOregister_IF |= BIT_0;
 				}
 				else
-					emu.cycles.statCycles += GB_CyclesSTAT; // Set the mode flag to 1 after delaying at least 4 cycles.
+					// Set the mode flag to 1 after delaying at least 4 cycles.
+					emu.cycles.statCycles += GB_CyclesSTAT;
 			}
-			
 			CheckLYC();
 		}
 	}
@@ -3870,9 +3873,13 @@ void DrawScanline()
 				if ((scanlineX >= (IOregister_WX - 7)) && (IOregister_LY >= IOregister_WY))
 				{
 					windowX = (scanlineX - (IOregister_WX - 7)) / 8;
+					//windowX = scanlineX / 8;
 					windowY = windowScanline / 8;
+					//windowY = IOregister_LY / 8;
 					tileX = (scanlineX - (IOregister_WX - 7)) & 7;
+					//tileX = scanlineX & 7;
 					tileY = windowScanline & 7;
+					//tileY = IOregister_LY & 7;
 
 					if (tileData == 0x0000)
 						tileNumber = emu.memory.videoRam[windowMapData + (windowY * 32) + windowX];
@@ -3895,8 +3902,9 @@ void DrawScanline()
 			}
 		}
 	}
-	// If the window was enabled this scanline.
-	if ((IOregister_LCDC & BIT_5) && (IOregister_WX <= 166))
+	// If the window was drawn this scanline.
+	if ((IOregister_LCDC & BIT_5) && (IOregister_WX <= 166) &&
+		(IOregister_LY >= IOregister_WY))
 		windowScanline++;
 
 	//----------------------------------------//

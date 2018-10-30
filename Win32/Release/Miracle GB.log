@@ -1,0 +1,16 @@
+﻿  GBemu.c
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\gbemu.c(3157): warning C4047: 'function': 'char *const ' differs in levels of indirection from 'unsigned char (*)[256]'
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\gbemu.c(3157): warning C4024: 'sprintf': different types for formal and actual parameter 1
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\gbemu.c(3158): warning C4047: 'function': 'unsigned char *' differs in levels of indirection from 'unsigned char (*)[256]'
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\gbemu.c(3158): warning C4024: 'OpcodeError': different types for formal and actual parameter 1
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\gbemu.c(3218): warning C4047: 'function': 'char *const ' differs in levels of indirection from 'unsigned char (*)[256]'
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\gbemu.c(3218): warning C4024: 'sprintf': different types for formal and actual parameter 1
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\gbemu.c(3219): warning C4047: 'function': 'unsigned char *' differs in levels of indirection from 'unsigned char (*)[256]'
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\gbemu.c(3219): warning C4024: 'OpcodeError': different types for formal and actual parameter 1
+c:\users\benjamin\desktop\software dev\miracle gb rewrite - sound library\gbemu.c(3637): warning C4013: 'UpdateScreen' undefined; assuming extern returning int
+  Generating code
+  0 of 109 functions ( 0.0%) were compiled, the rest were copied from previous compilation.
+    0 functions were new in current compilation
+    0 functions had inline decision re-evaluated but remain unchanged
+  Finished generating code
+  Miracle GB.vcxproj -> C:\Users\Benjamin\Desktop\Software Dev\Miracle GB Rewrite - Sound Library\Win32\Release\Miracle GB.exe
