@@ -16,19 +16,19 @@ MSG Msg;
 //----------------------------------------//
 // External functions.                    //
 //----------------------------------------//
-
 extern void CloseSDL();
-extern void CPUReset();
+extern void SystemReset();
+extern void HandleSDLEvents();
 extern int  InitializeSDL();
-extern int  LoadRomFile(char filename[]);
-extern FILE *OpenLogFile();
+unsigned char* LoadRomFile(char filename[], unsigned long int *fileSize);
+FILE *OpenLogFile();
+extern void AddFPSTimer();
+extern void RemoveFPSTimer();
 extern int  OpenSDLWindow();
 extern void ResizeScreen();
 extern void RunEmulation();
 extern void ClearGBMemory();
-extern void UpdateDebugger();
-extern void ShowDebugger();
-extern void SetupDebugger();
+extern int EmulationInitialize(unsigned char *fileBuffer, unsigned long int fileSize);
 //----------------------------------------//
 
 //----------------------------------------//
@@ -45,41 +45,33 @@ extern unsigned int screenWidth;
 // Miscellaneous variables.               //
 //----------------------------------------//
 
+HANDLE hRomFile;
+HANDLE logFile;
 char szFileName[MAX_PATH] = "";
-
 unsigned int CPURunning = 0;
 unsigned int FPSLimit = 1;
 unsigned int logging = 0;
+unsigned int emulationInitialized = 0;
 //----------------------------------------//
 
-//----------------------------------------//
-// Miscellaneous pointers.                //
-//----------------------------------------//
-
-unsigned char *bootBuffer;
-unsigned char *romBuffer;
-unsigned char *memory;
-//----------------------------------------//
+// Display an error message if there was an invalid opcode ran.
+void OpcodeError(char *errorText)
+{
+	MessageBox(hWnd, errorText, "Error!", MB_OK);
+}
 
 //----------------------------------------//
 // Windows Callback routine.              //
 //----------------------------------------//
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+	unsigned char *romFileBuffer = 0;
+	unsigned long int fileSize = 0;
+
 	switch(msg)
 	{
 	case WM_CREATE:
 		{
-			//----------------------------------------//
-			// Make sure we can allocate enough memory//
-			// for the largest Gameboy ROM.           //
-			//----------------------------------------//
-			if ((!(romBuffer = (unsigned char *)(malloc(0x200000)))) || (!(bootBuffer = (unsigned char *)(malloc(0x100)))) || (!(memory = (unsigned char *)(malloc(0x10000)))))
-			{
-				MessageBox(hWnd, "Could not allocate memory for buffer!", "Error!", MB_OK);
-				DestroyWindow(hWnd);
-				exit(0);
-			}
 			//----------------------------------------//
 			// In the case SDL could not be started,  //
 			// complain and then exit.                //
@@ -90,18 +82,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				DestroyWindow(hWnd);
 				exit(0);
 			}
-			//----------------------------------------//
-			// Clear Gameboy Memory					  //
-			//----------------------------------------//
-			ClearGBMemory();
-			//----------------------------------------//
-			// Reset the Gameboy CPU				  //
-			//----------------------------------------//
-			CPUReset();
-			//----------------------------------------//
-			// Setup the debugger					  //
-			//----------------------------------------//
-			SetupDebugger();
 		}
 	break;
 	case WM_CLOSE:
@@ -128,7 +108,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 				ofn.lStructSize = sizeof(ofn);
 				ofn.hwndOwner = hWnd;
-				ofn.lpstrFilter = "GB Files (*.gb)\0*.gb\0GBC Files (*.gbc)\0*.gbc\0";
+				ofn.lpstrFilter = "GB/GBC/SGB Files\0*.gb;*.gbc;*.sgb\0";
 				ofn.lpstrFile = szFileName;
 				ofn.nMaxFile = MAX_PATH;
 				ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
@@ -136,21 +116,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 				if(GetOpenFileName(&ofn))
 				{
-					switch(LoadRomFile(szFileName))
+					romFileBuffer = LoadRomFile(szFileName, &fileSize);
+					if (!romFileBuffer)
+						MessageBox(hWnd, "Error opening ROM file!", "Error!", MB_OK);
+					else
 					{
-					case -1:
-						{
-							MessageBox(hWnd, "Could not open file in Read-Only Binary mode!", "Error!", MB_OK);
-						}
-					break;
-					case -2:
-						{
-							MessageBox(hWnd, "Could not read from file!", "Error!", MB_OK);
-						}
-					break;
+						EmulationInitialize(romFileBuffer, fileSize);
+						if (FPSLimit == 1)
+							AddFPSTimer();
+						RunEmulation();
 					}
 				}
-				CPUReset();
 			}
 		break;
 		case IDM_FILE_EXIT:
@@ -162,18 +138,25 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		break;
 		case IDM_EMULATE_RUN:
 			{
-				CPURunning = 1;
-				RunEmulation();
 			}
 		break;
 		case IDM_EMULATE_RESET:
 			{
-				CPUReset();
+				//SystemReset();
 			}
 		break;
 		case IDM_OPTIONS_USEFPSLIMIT:
 			{
-				FPSLimit ^= 1;
+			if (FPSLimit == 1)
+			{
+				RemoveFPSTimer();
+				FPSLimit = 0;
+			}
+			else
+			{
+				AddFPSTimer();
+				FPSLimit = 1;
+			}
 			}
 		break;
 		/*case IDM_OPTIONS_DISPLAYSIZE_1X:
@@ -202,19 +185,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		break;
 		case IDM_DEBUG_STARTDEBUGGER:
 			{				
-				ShowDebugger();
+				//ShowDebugger();
 			}
 		break;
 		case IDM_DEBUG_STARTLOGGING:
 			{
 				logging = 1;
-				if(OpenLogFile() != 0)
-					MessageBox(hWnd, "Open log file failed!", "Error", MB_OK);
+				logFile = CreateFile("log.txt", GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 			}
 		break;
 		case IDM_DEBUG_STOPLOGGING:
 			{
 				logging = 0;
+				CloseHandle(logFile);
 			}
 		break;
 		}
@@ -228,7 +211,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 //----------------------------------------//
 // The main function.  This setups the    //
-// main window.                           //
+// main window and message checking.      //
 //----------------------------------------//
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	LPSTR lpCmdLine, int nCmdShow)
@@ -261,16 +244,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		CW_USEDEFAULT, CW_USEDEFAULT, screenWidth, screenHeight,
 		NULL, NULL, hInstance, NULL);
 
-	if(hWnd == NULL)
+	if (!OpenSDLWindow())
+		MessageBox(NULL, "SDL Creation Failed!", "Error!",
+		MB_ICONEXCLAMATION | MB_OK);
+
+	if (hWnd == NULL)
 	{
 		MessageBox(NULL, "Window Creation Failed!", "Error!",
-		MB_ICONEXCLAMATION | MB_OK);
+			MB_ICONEXCLAMATION | MB_OK);
 	}
-
-	OpenSDLWindow();
-
-	ShowWindow(hWnd, nCmdShow);
-	UpdateWindow(hWnd);
+	else
+	{
+		ShowWindow(hWnd, nCmdShow);
+		UpdateWindow(hWnd);
+	}
 
 	while(GetMessage(&Msg, hWnd, 0, 0) > 0)
 	{

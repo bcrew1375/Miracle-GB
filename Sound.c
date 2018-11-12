@@ -7,7 +7,7 @@
 
 #include "define.h"
 
-extern unsigned char *memory[];
+extern unsigned char *emu.memory.internRam];
 
 #define SAMPLE_RATE 44100
 #define CHANNELS    2

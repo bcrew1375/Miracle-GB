@@ -6,14 +6,17 @@
 //----------------------------------------//
 SDL_Color colors[4];
 SDL_Event event;
-SDL_Window *window;
+SDL_Window *sdlWindow;
 SDL_Surface *screen;
 SDL_Texture *texture;
 SDL_Renderer *renderer;
-SDL_TimerID timerID;
 SDL_DisplayMode displayMode;
+static SDL_TimerID fpsTimerID = NULL;
 //----------------------------------------//
 
+void HandleSDLEvents();
+void SetupSDLTimers();
+void UpdateScreen();
 
 //----------------------------------------//
 // External data.                         //
@@ -24,13 +27,12 @@ extern int InitializeSound();
 
 // External variables and arrays.
 extern HWND hWnd;
-extern SDL_TimerID FPSTimerID;
 
 extern unsigned char joyState[8];
 extern unsigned char *memory;
-
+extern unsigned char screenData[0x5A00];
 extern unsigned int CPURunning;
-extern unsigned int FPS;
+extern unsigned long long int FPS;
 extern unsigned int FPSLimit;
 extern unsigned int SpeedKey;
 
@@ -72,8 +74,8 @@ unsigned char *screen_ptr;
 // Screen buffer arrays.                  //
 //----------------------------------------//
 
-unsigned char oldScreenData[160 * 144];
-unsigned char screenData[160 * 144];
+//unsigned char oldScreenData[160 * 144];
+//unsigned char screenData[160 * 144];
 //----------------------------------------//
 
 
@@ -85,9 +87,6 @@ int InitializeSDL()
 {
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) == -1)
 		return -1;
-
-	/*if (InitializeSound() == -1)
-		return -1;*/
 
 	return 0;
 }
@@ -102,30 +101,31 @@ void ResizeScreen()
 	//rectangleWidth = screenWidth / 160;
 	//rectangleHeight = screenHeight / 144;
 
-	SDL_SetWindowSize(window, screenWidth * screenSizeMultiplier, screenHeight * screenSizeMultiplier);
+	SDL_SetWindowSize(sdlWindow, screenWidth * screenSizeMultiplier, screenHeight * screenSizeMultiplier);
 }
-
 
 //----------------------------------------//
 // Open the SDL window, set up the palette//
 //----------------------------------------//
 int OpenSDLWindow()
 {
-	window = SDL_CreateWindowFrom(hWnd);//"Miracle GB", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screenWidth * screenSizeMultiplier, screenHeight * screenSizeMultiplier, SDL_WINDOW_OPENGL);
-	if (window == NULL)
-		return -1;
-	renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+	sdlWindow = SDL_CreateWindowFrom(hWnd);//"Miracle GB", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screenWidth * screenSizeMultiplier, screenHeight * screenSizeMultiplier, SDL_WINDOW_OPENGL);
+	if (sdlWindow == NULL)
+		return 0;
+	renderer = SDL_CreateRenderer(sdlWindow, -1, SDL_RENDERER_SOFTWARE);
 	if (renderer == NULL)
-		return -1;
+		return 0;
 	SDL_RenderSetLogicalSize(renderer, screenWidth, screenHeight);
-	screen = SDL_CreateRGBSurface(0, screenWidth, screenHeight, 8, 0, 0, 0, 0);
+
 	// Set up a pointer to the screen
-	//screen_ptr = (unsigned char *)screen->pixels;	
+	//screen_ptr = (unsigned char *)screen->pixels;
 
 	ResizeScreen();
 
-	memset(&oldScreenData, 0, 0x5A00);
-	memset(&screenData, 0, 0x5A00);
+	//memset(&oldScreenData, 0, 0x5A00);
+	//memset(&screenData, 0, 0x5A00);
+
+	screen = SDL_CreateRGBSurfaceFrom(&screenData, screenWidth, screenHeight, 8, screenWidth, 0, 0, 0, 0);
 
 	colors[0].r = 0xFF;
 	colors[0].g = 0xFF;
@@ -145,9 +145,8 @@ int OpenSDLWindow()
 
 	SDL_SetPaletteColors(screen->format->palette, colors, 0, 4);
 
-	return 0;
+	return -1;
 }
-
 
 //----------------------------------------//
 // Close down all SDL functions.          //
@@ -156,72 +155,6 @@ void CloseSDL()
 {
 	SDL_Quit();
 }
-
-
-//----------------------------------------//
-// Update the SDL event queue.            //
-//----------------------------------------//
-void CheckSDLEvents()
-{
-	SDL_PumpEvents();
-}
-
-
-//----------------------------------------//
-// This function draws the actual screen  //
-// data to the surface then displays it.  //
-//----------------------------------------//
-void UpdateScreen()
-{
-	/*unsigned int i;
-	unsigned int j;
-		
-	plotRectangle.w = 1;//rectangleWidth;
-	plotRectangle.h = 1;//rectangleHeight;
-
-	// Make sure the display is enabled.
-	if (memory[0xFF40] & 0x80)
-	{
-		for (j = 0; j < 144; j++)
-		{
-			for (i = 0; i < 160; i++)
-			{
-				if ((screenData[((j << 7) + (j << 5)) + i]) != (unsigned char)(oldScreenData[((j << 7) + (j << 5)) + i]))
-				{
-					//plotRectangle.x = i;// * rectangleWidth;
-					//plotRectangle.y = j;// * rectangleHeight;
-					
-					//SDL_FillRect(screen, &plotRectangle, (unsigned char)(screenData[((j << 7) + (j << 5)) + i]));
-				}
-			}
-		}
-		memcpy(&oldScreenData[0x0000], &screenData[0x0000], 0x5A00);
-	}
-	else
-	{
-		for (j = 0; j < 144; j++)
-		{
-			for (i = 0; i < 160; i++)
-			{
-				plotRectangle.x = i;// * rectangleWidth;
-				plotRectangle.y = j;// * rectangleHeight;
-					
-				SDL_FillRect(screen, &plotRectangle, 0);
-			}
-		}
-		memset(&oldScreenData[0x0000], 0, 0x5A00);
-	}*/
-
-	SDL_memcpy(screen->pixels, &screenData, 0x5A00);
-	texture = SDL_CreateTextureFromSurface(renderer, screen);
-	SDL_RenderClear(renderer);
-	SDL_RenderCopy(renderer, texture, 0, 0);
-	SDL_DestroyTexture(texture);
-	SDL_RenderPresent(renderer);
-
-	CheckSDLEvents();
-}
-
 
 //----------------------------------------//
 // This updates the FPS display in the    //
@@ -234,13 +167,45 @@ unsigned int UpdateFPS(Uint32 interval, void *param)
 	//*windowTitle = SDL_GetWindowTitle(window);
 	
 	sprintf(&windowTitle, "Miracle GB   FPS: %d", FPS);
-	SDL_SetWindowTitle(window, windowTitle);
+	SDL_SetWindowTitle(sdlWindow, windowTitle);
 
 	FPS = 0;
 	
 	return interval;
 }
 
+void AddFPSTimer()
+{
+	if (!fpsTimerID)
+		fpsTimerID = SDL_AddTimer(1000, UpdateFPS, 0);
+}
+
+void RemoveFPSTimer()
+{
+	if (fpsTimerID)
+		fpsTimerID = SDL_RemoveTimer(fpsTimerID);
+}
+
+//----------------------------------------//
+// This will lock the emulation to        //
+// roughly 60 frames a second.            //
+//----------------------------------------//
+void LimitFPS()
+{
+	static unsigned long int emulationTimer = 0;
+	unsigned int timeDifference;
+	
+	if (!emulationTimer)
+		emulationTimer = SDL_GetTicks();
+
+	timeDifference = SDL_GetTicks() - emulationTimer;
+
+	// Display one frame per 1/60 of a second.
+	if (timeDifference < 16.6)
+		SDL_Delay(16.6 - timeDifference);
+
+	emulationTimer = SDL_GetTicks();
+}
 
 //----------------------------------------//
 // This pauses or resumes the emulation   //
@@ -248,16 +213,6 @@ unsigned int UpdateFPS(Uint32 interval, void *param)
 //----------------------------------------//
 void PauseEmu()
 {
-	if (CPURunning = 1)
-	{
-		CPURunning = 0;
-		SDL_RemoveTimer(FPSTimerID);
-	}
-	else
-	{
-		CPURunning = 1;
-		RunEmulation();
-	}
 }
 
 
@@ -274,7 +229,7 @@ void GetKeys()
 	// Check System keystates.
 	if (keyState[SDL_SCANCODE_ESCAPE])
 	{
-		CPURunning ^ 1;
+		CPURunning ^= 1;
 		PauseEmu();
 	}
 	if (keyState[SDL_SCANCODE_TAB])
@@ -345,4 +300,27 @@ void GetKeys()
 		joyState[7] = 1;
 	else
 		joyState[7] = 0;
+}
+
+//----------------------------------------//
+// This function draws the actual screen  //
+// data to the surface then displays it.  //
+//----------------------------------------//
+void UpdateScreen()
+{
+	SDL_memcpy(screen->pixels, screenData, 0x5A00);
+	texture = SDL_CreateTextureFromSurface(renderer, screen);
+	SDL_RenderClear(renderer);
+	SDL_RenderCopy(renderer, texture, 0, 0);
+	SDL_DestroyTexture(texture);
+	SDL_RenderPresent(renderer);
+}
+
+//----------------------------------------//
+// Update the SDL event queue.            //
+//----------------------------------------//
+void HandleSDLEvents()
+{
+	SDL_PumpEvents();
+	GetKeys();
 }

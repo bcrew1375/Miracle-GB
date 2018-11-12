@@ -11,8 +11,7 @@ char *bootRomFile = "bootrom.bin";
 unsigned long int bytesRead;
 
 // External variable used to store the ROM binary.
-extern unsigned char *bootBuffer;
-extern unsigned char *romBuffer;
+unsigned char romBuffer[0x1000000];
 
 unsigned int bootRomPresent;
 
@@ -23,13 +22,13 @@ unsigned int bootRomPresent;
 // Variables: filename is a string holding//
 // the ROM file to be opened.             //
 //----------------------------------------//
-int LoadRomFile(char filename[])
+unsigned char * LoadRomFile(char filename[], unsigned long int *bytesRead)
 {
 	//----------------------------------------//
 	// If bootRom is present, load it into    //
 	// memory.                                //
 	//----------------------------------------//
-	if((romHandle = fopen(bootRomFile, "rb")) == NULL)
+	/*if((romHandle = fopen(bootRomFile, "rb")) == NULL)
 	{
 		bootRomFile = "bootrom/bootrom.bin";	// If not found in program folder, check "bootrom" subfolder.
 		
@@ -40,19 +39,19 @@ int LoadRomFile(char filename[])
 	{
 		bytesRead = fread(bootBuffer, 1, 0x100, romHandle);
 		bootRomPresent = 1;
-	}
+	}*/
 	//----------------------------------------//
 	// Try to open the file in Read-Only      //
 	// binary mode, if it fails, return with  //
 	// an error.                              //
 	//----------------------------------------//
 	if((romHandle = fopen(filename, "rb")) == NULL)
-		return -1;
+		return 0;
 
 	//----------------------------------------//
 	// Read up to the max size of a GB ROM.   //
 	//----------------------------------------//
-	bytesRead = fread(romBuffer, 1, 0x200000, romHandle);
+	*bytesRead = fread(romBuffer, 1, 0x1000000, romHandle);
 
 	//----------------------------------------//
 	// Close the file.                        //
@@ -65,12 +64,12 @@ int LoadRomFile(char filename[])
 	// is not 0.                              //
 	//----------------------------------------//
 	if ((!bytesRead) || (bytesRead == 0))
-		return -2;
+		return 0;
 
 	//----------------------------------------//
 	// Return with no errors.                 //
 	//----------------------------------------//
-	return 0;
+	return romBuffer;
 }
 
 int OpenLogFile()
@@ -82,7 +81,7 @@ int OpenLogFile()
 		return 0;
 }
 
-void WriteToLog(const char *writeData)
+void WriteToLog(unsigned char *writeData)
 {
-	fprintf(handle, writeData, NULL);
+	fprintf(handle, writeData);
 }
